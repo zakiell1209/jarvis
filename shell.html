@@ -1,0 +1,84 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Джарвис</title>
+<style>
+html,body{margin:0;height:100%;background:#0e1217}
+#f{position:fixed;inset:0;width:100%;height:100%;border:0}
+#bar{position:fixed;left:10px;right:10px;top:calc(8px + env(safe-area-inset-top,0px));z-index:9;display:none;gap:8px;align-items:center;padding:10px 12px;border-radius:12px;background:#2563eb;color:#fff;font:14px system-ui,sans-serif;box-shadow:0 4px 16px #0006}
+#bar span{flex:1}#bar button{border:0;border-radius:8px;padding:8px 12px;font:inherit;background:#fff;color:#111}
+</style></head><body>
+<iframe id="f"></iframe>
+<div id="bar"></div>
+<script>
+// Оболочка: НЕ меняется ИИ. Грузит приложение (index.html из GitHub main) в iframe,
+// предлагает обновления, проверяет их перед применением и откатывает при сбое.
+const L=localStorage,$=id=>document.getElementById(id);
+const J=k=>{try{return JSON.parse(L.getItem(k))}catch(e){return null}};
+const cfg=()=>J('jv_c')||{},repo=()=>cfg().ghRepo||'zakiell1209/jarvis';
+const GH=()=>Object.assign({Accept:'application/vnd.github+json'},cfg().ghToken?{Authorization:'Bearer '+cfg().ghToken}:{});
+let cur='',pend=null,wd;
+
+function bar(t,...btns){const b=$('bar');if(!t){b.style.display='none';return}
+  b.replaceChildren();const s=document.createElement('span');s.textContent=t;b.append(s);
+  btns.forEach(([l,fn])=>{const x=document.createElement('button');x.textContent=l;x.onclick=fn;b.append(x)});b.style.display='flex'}
+
+async function load(){
+  const apk=(await(await fetch('app.sha')).text()).trim();
+  if(L.getItem('jv_apk')!==apk){L.removeItem('jv_ota');L.removeItem('jv_prev');L.setItem('jv_apk',apk)} // новый APK новее старого обновления
+  const o=J('jv_ota'),b=J('jv_boot');let html,sha;
+  if(o&&!(b&&b.sha===o.sha&&!b.ok)){html=o.html;sha=o.sha;L.setItem('jv_boot',JSON.stringify({sha,ok:false}))}
+  else{if(o)L.removeItem('jv_ota');html=await(await fetch('app.html')).text();sha=apk}
+  cur=sha;clearTimeout(wd);
+  if(sha!==apk)wd=setTimeout(()=>{if(cur===sha){L.removeItem('jv_ota');load().then(()=>bar('Обновление не запустилось — вернул встроенную версию',['OK',()=>bar()]))}},10000);
+  $('f').srcdoc=html;
+}
+
+const preflight=html=>new Promise((ok,no)=>{
+  const f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.display='none';
+  const t=setTimeout(()=>{fin();no(new Error('приложение не запустилось'))},8000);
+  const on=e=>{if(e.source===f.contentWindow&&e.data==='jv-ready'){fin();ok()}};
+  function fin(){clearTimeout(t);removeEventListener('message',on);f.remove()}
+  addEventListener('message',on);f.srcdoc=html;document.body.append(f);
+});
+
+async function check(auto,manual){
+  try{
+    const r=await fetch('https://api.github.com/repos/'+repo()+'/contents/index.html?ref=main',{headers:GH(),cache:'no-store'});
+    if(!r.ok)throw new Error('GitHub '+r.status);
+    const j=await r.json();
+    if(j.sha===cur){if(manual)bar('У вас последняя версия',['OK',()=>bar()]);return}
+    if(!manual&&J('jv_skip')===j.sha)return;
+    pend=j;
+    if(auto)return apply();
+    let m='';try{const c=await(await fetch('https://api.github.com/repos/'+repo()+'/commits?path=index.html&per_page=1',{headers:GH()})).json();m=c[0].commit.message.split('\n')[0]}catch(e){}
+    bar('Доступно обновление'+(m?': '+m:''),['Обновить',apply],['Позже',()=>bar()]);
+  }catch(e){if(manual)bar('Не удалось проверить: '+(e.message||e),['OK',()=>bar()])}
+}
+
+async function apply(){
+  if(!pend)return;
+  try{
+    bar('Проверяю обновление…');
+    const html=decodeURIComponent(escape(atob(pend.content.replace(/\n/g,''))));
+    await preflight(html);
+    const old=J('jv_ota');if(old)L.setItem('jv_prev',JSON.stringify(old));else L.removeItem('jv_prev');
+    L.setItem('jv_ota',JSON.stringify({sha:pend.sha,html}));pend=null;
+    await load();
+    bar('Обновлено ✓',['Откатить',rollback],['OK',()=>bar()]);
+  }catch(e){bar('Обновление не прошло проверку: '+(e.message||e),['OK',()=>bar()])}
+}
+
+function rollback(){
+  L.setItem('jv_skip',JSON.stringify(cur));
+  const p=J('jv_prev');if(p)L.setItem('jv_ota',JSON.stringify(p));else L.removeItem('jv_ota');
+  L.removeItem('jv_prev');load().then(()=>bar('Откат выполнен',['OK',()=>bar()]));
+}
+
+addEventListener('message',e=>{
+  if(e.source!==$('f').contentWindow)return;
+  if(e.data==='jv-ready'){clearTimeout(wd);const b=J('jv_boot');if(b&&b.sha===cur){b.ok=true;L.setItem('jv_boot',JSON.stringify(b))}}
+  else if(e.data==='jv-check')check(true,true);
+});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)check(false)});
+load().then(()=>setTimeout(()=>check(false),1500));
+</script></body></html>

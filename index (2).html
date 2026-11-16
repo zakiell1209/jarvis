@@ -1,0 +1,212 @@
+<!doctype html><html lang="ru"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Джарвис</title>
+<style>
+:root{--bg:#f4f6f9;--cd:#fff;--tx:#141922;--mu:#667085;--ac:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e3e7ee;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#0e1217;--cd:#171d26;--tx:#e8ecf3;--mu:#98a2b3;--ac:#6b95ff;--bd:#283240;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,sans-serif}
+main{max-width:640px;margin:0 auto;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 90px}
+nav{position:fixed;left:0;right:0;bottom:0;display:flex;background:var(--cd);border-top:1px solid var(--bd);padding-bottom:env(safe-area-inset-bottom,0px)}
+nav button{flex:1;padding:14px 2px;border:0;background:none;color:var(--mu);font-size:12.5px}nav button.on{color:var(--ac);font-weight:700}
+.card{background:var(--cd);border:1px solid var(--bd);border-radius:14px;padding:12px;margin:10px 0}
+textarea,input,select{width:100%;box-sizing:border-box;border:1px solid var(--bd);border-radius:10px;padding:10px;font:inherit;background:var(--bg);color:var(--tx);margin:4px 0}
+textarea{min-height:96px}input[type=checkbox]{width:auto;margin:0}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.b{border:0;border-radius:10px;padding:11px 14px;font:inherit;background:var(--ac);color:#fff}.g{background:var(--bd);color:var(--tx)}.ok{background:var(--ok)}.rd{background:var(--bad)}.b:disabled{opacity:.5}
+.mu{color:var(--mu);font-size:14px}.ans{white-space:pre-wrap}.er{color:var(--bad)}.mode{display:flex;gap:8px;align-items:center;margin-top:8px}
+.tag{font-size:12px;padding:2px 8px;border-radius:99px;background:var(--bd);color:var(--mu)}
+</style></head><body><main id="v"></main><nav id="tabs"></nav>
+<script>
+const $=s=>document.querySelector(s),uid=()=>Math.random().toString(36).slice(2,10),clean=s=>s.replace(/```json|```/g,'').trim();
+const DEF=`async function handle(task, api){
+  if(task==='__ping__') return 'ok';
+  const mem=await api.memory();
+  const skills=mem.map(m=>'- '+m.title+': '+m.text).join('\\n');
+  return await api.llm('Ты личный ИИ-помощник. Отвечай по-русски, кратко.\\nНавыки:\\n'+skills+'\\nЗадание: '+task);
+}`;
+const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
+let S=ld('jv_s',{log:[],tasks:[],rules:[]}),C=ld('jv_c',{provider:'gemini',model:'gemini-3.6-flash',key:'',selfReview:true,ghToken:'',ghRepo:'',pin:''});
+const save=()=>{localStorage.setItem('jv_s',JSON.stringify(S));localStorage.setItem('jv_c',JSON.stringify(C))};
+const h=async p=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('jv|'+p)))].map(b=>b.toString(16).padStart(2,'0')).join('');
+const curCode=()=>{const c=S.log.filter(e=>e.kind==='code'&&e.status==='active');return c.length?c[c.length-1].body:DEF};
+const stopHit=t=>{const r=S.rules.find(r=>r.k==='stop'&&t.toLowerCase().includes(r.t.toLowerCase()));if(r)throw new Error('Заблокировано стоп-словом: '+r.t)};
+
+const ft=(u,o)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),60000);return fetch(u,{...o,signal:c.signal}).catch(e=>{throw new Error(e.name==='AbortError'?'Нет ответа от сервера ИИ за 60 секунд (проверьте интернет, ключ и название модели)':'Сеть: '+e.message)}).finally(()=>clearTimeout(t))};
+async function llm(prompt,raw){
+  if(!C.key)throw new Error('Не указан ключ API (вкладка «Настройки»)');
+  const rules=S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n');
+  const full=raw?prompt:'ПРАВИЛА ВЛАДЕЛЬЦА (нарушать нельзя ни при каких условиях):\n'+(rules||'(нет)')+'\n\n'+prompt;
+  let t;
+  if(C.provider==='gemini'){
+    const r=await ft('https://generativelanguage.googleapis.com/v1beta/models/'+C.model+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':C.key},body:JSON.stringify({contents:[{parts:[{text:full}]}]})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||'Ошибка '+r.status);
+    t=j.candidates[0].content.parts.map(p=>p.text||'').join('');
+  }else{
+    const r=await ft('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':C.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:C.model,max_tokens:8000,messages:[{role:'user',content:full}]})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||'Ошибка '+r.status);
+    t=j.content.map(p=>p.text||'').join('');
+  }
+  if(!raw)stopHit(t);
+  return t;
+}
+
+// Песочница: код ИИ работает в изолированном iframe без сети, хранилища и доступа к правилам
+function runAgent(code,task,api){return new Promise((res,rej)=>{
+  const f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.display='none';
+  let rt;const to=setTimeout(()=>{fin();rej(new Error('Общий таймаут 180 секунд'))},180000);
+  function fin(){clearTimeout(to);clearTimeout(rt);removeEventListener('message',on);f.remove()}
+  function on(e){if(e.source!==f.contentWindow)return;const m=e.data||{};
+    if(m.t==='ready'){clearTimeout(rt);f.contentWindow.postMessage({t:'run',task},'*')}
+    else if(m.t==='api'){
+      if(!Object.prototype.hasOwnProperty.call(api,m.fn)){f.contentWindow.postMessage({t:'ret',id:m.id,e:'Запрещено'},'*');return}
+      Promise.resolve().then(()=>api[m.fn](...m.args)).then(r=>f.contentWindow.postMessage({t:'ret',id:m.id,r},'*'),er=>f.contentWindow.postMessage({t:'ret',id:m.id,e:String(er.message||er)},'*'));
+    }else if(m.t==='done'){fin();res(m.r)}else if(m.t==='err'){fin();rej(new Error(m.e))}}
+  addEventListener('message',on);
+  rt=setTimeout(()=>{fin();rej(new Error('Песочница не запустилась (нет сигнала ready)'))},10000);
+  const enc=JSON.stringify(code).replace(/</g,'\\u003c');
+  f.srcdoc='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\'"><script>'+
+  'const P={};let n=0;const api=new Proxy({},{get:(_,fn)=>(...args)=>new Promise((ok,no)=>{const id=++n;P[id]={ok,no};parent.postMessage({t:"api",fn,args,id},"*")})});'+
+  'addEventListener("message",async e=>{const m=e.data;if(m.t==="ret"){const p=P[m.id];delete P[m.id];m.e?p.no(new Error(m.e)):p.ok(m.r)}else if(m.t==="run"){try{const r=await handle(m.task,api);parent.postMessage({t:"done",r:String(r)},"*")}catch(x){parent.postMessage({t:"err",e:String(x&&x.message||x)},"*")}}});'+
+  'try{(0,eval)('+enc+');parent.postMessage({t:"ready"},"*")}catch(x){parent.postMessage({t:"err",e:String(x)},"*")}<\/script>';
+  document.body.append(f);
+})}
+
+const mkApi=(id,auto)=>({
+  llm:p=>llm(String(p)),
+  memory:async()=>S.log.filter(e=>e.kind==='mem'&&e.status==='active').map(e=>({title:e.title,text:e.body})),
+  remember:async(t,x)=>{S.log.push({id:uid(),kind:'mem',title:String(t).slice(0,80),body:String(x).slice(0,2000),taskId:id,source:auto?'task':'self',status:auto?'active':'pending',ts:Date.now()});save()}
+});
+
+// Улучшение кода: проверка → тест → судья → применение (сразу, если поручение ваше) или в «Одобрения»
+async function improve(goal,auto,taskId){
+  const raw=await llm('Ты разработчик ИИ-помощника. Вот его текущий код (JavaScript):\n'+curCode()+'\n\nДоступные функции: api.llm(prompt) -> строка; api.memory() -> [{title,text}]; api.remember(title,text). Нет доступа к сети, DOM и хранилищу. Код обязан определять async function handle(task, api), которая при task==="__ping__" возвращает строку "ok", а иначе возвращает текстовый ответ. Цель улучшения: '+goal+'\nВерни ТОЛЬКО полный новый код без пояснений и без markdown.');
+  const code=raw.replace(/^\s*```\w*\n?/,'').replace(/```\s*$/,'').trim();
+  if(code.length>30000||!/function\s+handle/.test(code))throw new Error('ИИ выдал некорректный код');
+  if(/\b(parent|top|window|document|fetch|XMLHttpRequest|localStorage|sessionStorage|WebSocket|indexedDB|postMessage|eval|Function|importScripts)\b/.test(code))throw new Error('Код содержит запрещённые обращения — отклонено');
+  stopHit(code);
+  const t=await runAgent(code,'__ping__',{llm:async()=>'ok',memory:async()=>[],remember:async()=>{}});
+  if(t!=='ok')throw new Error('Автотест не пройден');
+  let v;try{v=JSON.parse(clean(await llm('Ты независимый проверяющий. Правила владельца:\n'+(S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n')||'(нет)')+'\n\nПроверь код: нарушает ли он правила или пытается обойти ограничения/песочницу? Код:\n'+code+'\n\nОтветь JSON: {"ok":true/false,"why":"кратко"}',true)))}catch(e){v={ok:false,why:'проверяющий не ответил'}}
+  if(!v.ok)throw new Error('Проверка правил не пройдена: '+(v.why||''));
+  S.log.push({id:uid(),kind:'code',title:goal.slice(0,80),body:code,taskId,source:auto?'task':'self',status:auto?'active':'pending',ts:Date.now()});save();
+}
+
+// ===== Правка самого приложения: ИИ предлагает правки index.html -> ваше одобрение -> коммит в GitHub -> запрос обновления на телефоне =====
+const REPO=()=>C.ghRepo||'zakiell1209/jarvis',GHP='index.html';
+const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\n/g,'')))),b64e=s=>btoa(unescape(encodeURIComponent(s)));
+const PROT=/stopHit|S\.rules|C\.pin|unlocked|jv_c|jv_s|ghToken|function approve|function runAgent|function publishApp|function applyEdits|const PROT/;
+async function ghGet(){
+  if(!C.ghToken)throw new Error('Нужен GitHub токен (вкладка «Настройки»)');
+  const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+GHP+'?ref=main',{headers:H(),cache:'no-store'});
+  if(!r.ok)throw new Error('GitHub: '+r.status);const j=await r.json();return{sha:j.sha,text:b64d(j.content)};
+}
+function applyEdits(src,edits){let t=src;for(const e of edits){
+  if(!e||typeof e.old!=='string'||typeof e.new!=='string'||!e.old)throw new Error('Неверная правка');
+  if(PROT.test(e.old))throw new Error('Правка затрагивает защищённый код — отклонено');
+  const n=t.split(e.old).length-1;if(n!==1)throw new Error('Фрагмент для замены найден '+n+' раз (нужно ровно 1)');
+  t=t.replace(e.old,()=>e.new)}return t}
+function chk(t){const m=t.match(/<script>([\s\S]*)<\/script>/);if(!m)throw new Error('Нет блока script');
+  try{new Function(m[1])}catch(x){throw new Error('Синтаксическая ошибка: '+x.message)}
+  if(!/parent\.postMessage\('jv-ready','\*'\)/.test(t))throw new Error('Нет сигнала запуска jv-ready')}
+async function proposeApp(goal){
+  const {sha,text}=await ghGet();
+  const raw=await llm('Ты разработчик приложения «Джарвис» (один файл index.html: HTML+CSS+JS, интерфейс по-русски). Вот его полный код:\n'+text+'\n\nЗадача: '+goal+'\nВерни ТОЛЬКО JSON без markdown: {"title":"кратко, что меняется","edits":[{"old":"точный фрагмент кода, встречающийся ровно один раз","new":"чем заменить"}]}. Правок минимум, фрагменты old короткие и уникальные, копируй символ в символ. Не трогай защиту: правила, PIN, стоп-слова, одобрения, ключи, песочницу. Новую вкладку добавляй в массив вкладок и в объект с функциями vXxx внутри render(). Не удаляй строку с parent.postMessage("jv-ready").',true);
+  let p;try{p=JSON.parse(clean(raw))}catch(e){throw new Error('ИИ вернул не JSON')}
+  if(!Array.isArray(p.edits)||!p.edits.length||p.edits.length>30)throw new Error('ИИ не предложил правок');
+  chk(applyEdits(text,p.edits));
+  let v;try{v=JSON.parse(clean(await llm('Ты независимый проверяющий. Правила владельца:\n'+(S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n')||'(нет)')+'\n\nИИ предлагает правки кода приложения. Нарушают ли они правила, ослабляют ли защиту (правила, PIN, одобрения, песочницу, ключи) или отправляют данные наружу? Правки:\n'+JSON.stringify(p.edits)+'\n\nОтветь JSON: {"ok":true/false,"why":"кратко"}',true)))}catch(e){v={ok:false,why:'проверяющий не ответил'}}
+  if(!v.ok)throw new Error('Проверка правил не пройдена: '+(v.why||''));
+  S.log.push({id:uid(),kind:'app',title:String(p.title||goal).slice(0,80),body:JSON.stringify(p.edits),baseSha:sha,risk:p.edits.some(e=>PROT.test(e.new)),source:'self',status:'pending',ts:Date.now()});save();
+}
+async function publishApp(e){
+  const {sha,text}=await ghGet();const nt=applyEdits(text,JSON.parse(e.body));chk(nt);
+  const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+GHP,{method:'PUT',headers:H(),body:JSON.stringify({message:'agent: '+e.title,content:b64e(nt),sha,branch:'main'})});
+  if(!r.ok)throw new Error('GitHub: '+r.status+' (токену нужно право Contents: Read and write)');
+}
+async function goApp(){if(!txt.trim()||busy)return;const t=txt;busy='Придумываю правки…';err='';ans='';render();
+  try{await proposeApp(t);txt='';ans='Правки приложения ждут вашего решения во вкладке «Одобр.»'}catch(e){err=String(e.message||e)}busy='';save();render()}
+
+let tab='task',busy='',err='',ans='',txt='',learn=false,ask=null,unlocked=false,msg='',rk='deny',rt='';
+const status=s=>{busy=s;render()};
+async function runTask(text,auto){
+  const id='t'+Date.now();S.tasks.push({id,title:text.slice(0,80),ts:Date.now()});save();
+  if(auto){status('Улучшаю себя под задачу…');try{await improve(text,true,id)}catch(e){err='Самоулучшение не удалось: '+e.message}}
+  status('Выполняю…');
+  ans=await runAgent(curCode(),text,mkApi(id,auto));stopHit(ans);
+  if(C.selfReview&&!auto){status('Самоанализ…');try{const r=JSON.parse(clean(await llm('Задание: '+text+'\nТвой ответ: '+ans+'\nСтоит ли предложить владельцу улучшение твоего кода? Ответь JSON: {"suggest":true/false,"goal":"что улучшить"}')));if(r.suggest&&r.goal)await improve(String(r.goal),false,id)}catch(e){}}
+}
+async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e)}busy='';save();render()}
+async function approve(e){
+  if(e.kind==='app'){busy='Публикую…';render();try{await publishApp(e);e.status='published';save();parent.postMessage('jv-check','*')}catch(x){err=String(x.message||x)}busy='';save();render();return}
+  if(e.kind==='mem'){e.status='active';save();render();return}
+  S.log=S.log.filter(x=>x.id!==e.id);busy='Применяю…';render();
+  try{await improve(e.title,true,e.taskId)}catch(x){err=String(x.message||x)}busy='';save();render();
+}
+function rollbackTask(id){
+  const i=S.log.findIndex(e=>e.taskId===id);
+  const ids=new Set([id]);if(i>=0)S.log.slice(i).forEach(e=>ids.add(e.taskId));
+  S.log=S.log.filter(e=>!ids.has(e.taskId));S.tasks=S.tasks.filter(t=>!ids.has(t.id));save();
+}
+const conf=(k,fn)=>()=>{if(ask===k){ask=null;fn();render()}else{ask=k;render();setTimeout(()=>{if(ask===k){ask=null;render()}},4000)}};
+
+function el(t,p,...c){const e=document.createElement(t);for(const k in p||{}){if(k==='class')e.className=p[k];else if(k.slice(0,2)==='on')e[k]=p[k];else if(p[k]===false)continue;else e.setAttribute(k,p[k]===true?'':p[k])}c.flat().forEach(x=>{if(x!=null&&x!==false)e.append(x)});return e}
+function vTask(){
+  const ta=el('textarea',{placeholder:'Что сделать? Например: научись составлять планы тренировок'});ta.value=txt;ta.oninput=()=>{txt=ta.value};
+  const cb=el('input',{type:'checkbox'});cb.checked=learn;cb.onchange=()=>{learn=cb.checked;render()};
+  return [el('div',{class:'card'},ta,el('label',{class:'mode'},cb,'Режим обучения: это моё поручение изменить тебя'),
+    el('div',{class:'mu'},learn?'Улучшения применятся сразу — вы сами дали поручение.':'Обычный режим: любые изменения ждут вашего одобрения.'),
+    el('div',{class:'row'},el('button',{class:'b',disabled:!!busy,onclick:go},busy||'Выполнить'),el('button',{class:'b g',disabled:!!busy,onclick:goApp},'Изменить приложение'))),
+    err&&el('div',{class:'card er'},err),ans&&el('div',{class:'card ans'},ans)];
+}
+function vOk(){
+  const p=S.log.filter(e=>e.status==='pending');
+  if(!p.length)return el('div',{class:'card mu'},'Предложений нет. Всё, что я захочу изменить сам, появится здесь и не сработает без вашего «Одобрить».');
+  return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':e.kind==='app'?'Правка приложения':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:e.kind==='app'?(e.risk?'⚠ Затрагивает защитные функции!\n\n':'')+JSON.parse(e.body).map(x=>'− '+x.old.slice(0,200)+'\n+ '+x.new.slice(0,400)).join('\n\n'):'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
+    el('div',{class:'row'},el('button',{class:'b ok',disabled:!!busy,onclick:()=>approve(e)},busy||'Одобрить'),el('button',{class:'b rd',onclick:()=>{S.log=S.log.filter(x=>x.id!==e.id);save();render()}},'Отклонить'))))];
+}
+function vHist(){
+  const out=[el('div',{class:'mu'},'Откат задачи удаляет её изменения и все более поздние (они могли на них опираться).')];
+  [...S.tasks].reverse().forEach(t=>{
+    const es=S.log.filter(e=>e.taskId===t.id);
+    out.push(el('div',{class:'card'},el('b',null,t.title),...es.map(e=>el('div',{class:'mu'},(e.status==='active'?'✅ ':'⏳ ')+(e.kind==='code'?'код: ':'память: ')+e.title)),
+      el('div',{class:'row'},el('button',{class:'b rd',onclick:conf('r'+t.id,()=>rollbackTask(t.id))},ask==='r'+t.id?'Точно откатить?':'Откатить задачу'))));
+  });
+  if(!S.tasks.length)out.push(el('div',{class:'card mu'},'История пуста.'));
+  out.push(el('div',{class:'row'},el('button',{class:'b rd',onclick:conf('all',()=>{S.log=[];S.tasks=[];save()})},ask==='all'?'Точно стереть всё?':'Сбросить ИИ к заводскому')));
+  return out;
+}
+function vRules(){
+  const pin=el('input',{type:'password',placeholder:C.pin?'PIN-код':'Придумайте PIN (4+ символа)'});
+  if(!C.pin)return el('div',{class:'card'},el('p',null,'Правила защищены PIN-кодом: ИИ не может их менять, а вы — только после ввода PIN.'),pin,el('div',{class:'row'},el('button',{class:'b',onclick:async()=>{if(pin.value.length<4)return;C.pin=await h(pin.value);unlocked=true;save();render()}},'Установить PIN')));
+  if(!unlocked)return el('div',{class:'card'},pin,msg&&el('div',{class:'er'},msg),el('div',{class:'row'},el('button',{class:'b',onclick:async()=>{if(await h(pin.value)===C.pin){unlocked=true;msg=''}else msg='Неверный PIN';render()}},'Открыть')));
+  const sel=el('select',null,el('option',{value:'deny'},'Запрет'),el('option',{value:'allow'},'Разрешено'),el('option',{value:'stop'},'Стоп-слово (жёсткий блок)'));sel.value=rk;sel.onchange=()=>{rk=sel.value};
+  const inp=el('input',{placeholder:'Текст правила'});inp.value=rt;inp.oninput=()=>{rt=inp.value};
+  return [el('div',{class:'card'},sel,inp,el('div',{class:'row'},el('button',{class:'b',onclick:()=>{if(!rt.trim())return;S.rules.push({id:uid(),k:rk,t:rt.trim()});rt='';save();render()}},'Добавить'),el('button',{class:'b g',onclick:()=>{unlocked=false;render()}},'Закрыть'))),
+    el('div',{class:'mu'},'Запрет/Разрешено читает ИИ и проверяющий. Стоп-слово блокирует ответ программно.'),
+    ...S.rules.map(r=>el('div',{class:'card'},el('span',{class:'tag'},{deny:'Запрет',allow:'Разрешено',stop:'Стоп-слово'}[r.k]),' '+r.t,el('div',{class:'row'},el('button',{class:'b rd',onclick:()=>{S.rules=S.rules.filter(x=>x.id!==r.id);save();render()}},'Удалить'))))];
+}
+const H=()=>({Authorization:'Bearer '+C.ghToken,Accept:'application/vnd.github+json'});
+async function backup(){const u='https://api.github.com/repos/'+C.ghRepo+'/contents/backup.json';let sha;const g=await fetch(u,{headers:H()});if(g.ok)sha=(await g.json()).sha;
+  const r=await fetch(u,{method:'PUT',headers:H(),body:JSON.stringify({message:'backup',content:btoa(unescape(encodeURIComponent(JSON.stringify(S)))),sha})});if(!r.ok)throw new Error('GitHub: '+r.status)}
+async function restore(){const r=await fetch('https://api.github.com/repos/'+C.ghRepo+'/contents/backup.json',{headers:H()});if(!r.ok)throw new Error('GitHub: '+r.status);S=JSON.parse(decodeURIComponent(escape(atob((await r.json()).content.replace(/\n/g,'')))));save()}
+function vSet(){
+  const f=(k,ph,type)=>{const i=el('input',{type:type||'text',placeholder:ph});i.value=C[k]||'';i.onchange=()=>{C[k]=i.value.trim();save()};return i};
+  const pv=el('select',null,el('option',{value:'gemini'},'Google Gemini'),el('option',{value:'claude'},'Claude (Anthropic)'));pv.value=C.provider;
+  const md=f('model','Модель');pv.onchange=()=>{C.provider=pv.value;C.model=pv.value==='gemini'?'gemini-3.6-flash':'claude-sonnet-5-5';save();render()};
+  const sr=el('input',{type:'checkbox'});sr.checked=C.selfReview;sr.onchange=()=>{C.selfReview=sr.checked;save()};
+  const run=fn=>async()=>{msg='';try{await fn();if(!msg)msg='Готово'}catch(e){msg=String(e.message||e)}render()};
+  return el('div',{class:'card'},el('b',null,'«Мозг»'),pv,md,f('key','Ключ API','password'),
+    el('label',{class:'mode'},sr,'Самоанализ после задач (ИИ сам предлагает улучшения)'),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:run(async()=>{msg='Проверяю…';render();const t=await llm('Ответь одним словом: ок',true);msg='Связь есть. Ответ ИИ: '+t.slice(0,80)})},'Проверить связь с ИИ')),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:()=>{try{parent.postMessage('jv-check','*')}catch(e){}}},'Проверить обновления')),el('b',null,'Резерв в GitHub'),f('ghRepo','Репозиторий: логин/имя'),f('ghToken','GitHub токен','password'),
+    el('div',{class:'row'},el('button',{class:'b',onclick:run(backup)},'Сохранить копию'),el('button',{class:'b g',onclick:run(async()=>{if(!unlocked)throw new Error('Сначала откройте вкладку «Правила» и введите PIN');await restore()})},'Восстановить')),
+    msg&&el('div',{class:'mu'},msg));
+}
+function render(){
+  const n=S.log.filter(e=>e.status==='pending').length;
+  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+}
+render();
+try{parent.postMessage('jv-ready','*')}catch(e){}
+</script></body></html>
