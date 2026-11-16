@@ -206,18 +206,28 @@ function vSet(){
 // ===== Файлы: хранятся на телефоне (IndexedDB), кусками по 16 МБ, без лимита 200 МБ =====
 const CH=16*1024*1024,fs=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toFixed(1)+' МБ':Math.ceil(n/1e3)+' КБ';
 let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
-let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb');
+let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb'), avProg='';
 function vAvatar(){
   const inp=el('input',{placeholder:'Ссылка на .glb или .gltf модель'});inp.value=avUrl;
   const fInp=el('input',{type:'file',accept:'.zip,.glb,.gltf',style:'display:none'});
   fInp.onchange=async()=>{const f=fInp.files[0];if(!f)return;
     if(/\.zip$/i.test(f.name)){
-      try{const JSZip=(await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
-        const zip=new JSZip();const z=await zip.loadAsync(f);
+      try{
+        const startT=Date.now();
+        avProg='Чтение архива: 0%'; render();
+        const JSZip=(await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
+        const zip=new JSZip();
+        avProg='Распаковка ZIP...'; render();
+        const z=await zip.loadAsync(f);
         let glbF=null;for(const fn of Object.keys(z.files)){if(/\.(glb|gltf)$/i.test(fn)){glbF=z.files[fn];break;}}
         if(!glbF)throw new Error('В ZIP нет .glb или .gltf файла');
-        const blob=await glbF.async('blob');avUrl=URL.createObjectURL(blob);save();render();
-      }catch(e){alert('Ошибка чтения ZIP: '+e.message);}
+        avProg='Извлечение модели...'; render();
+        const blob=await glbF.async('blob');
+        const sec=Math.max(1, Math.round((Date.now()-startT)/1000));
+        avProg='Готово за '+sec+' сек.'; render();
+        setTimeout(()=>{avProg='';render();},3000);
+        avUrl=URL.createObjectURL(blob);save();render();
+      }catch(e){avProg='';alert('Ошибка чтения ZIP: '+e.message);render();}
     }else{avUrl=URL.createObjectURL(f);save();render();}
   };
   return [
@@ -225,7 +235,8 @@ function vAvatar(){
       el('b',null,'3D Аватар Джарвиса (с анимацией костей и физикой)'),
       inp,
       fInp,
-      el('div',{class:'row'},el('button',{class:'b',onclick:()=>{avUrl=inp.value.trim();save();render()}},'Сохранить по ссылке'),el('button',{class:'b g',onclick:()=>fInp.click()},'Загрузить .zip / файл'))
+      el('div',{class:'row'},el('button',{class:'b',onclick:()=>{avUrl=inp.value.trim();save();render()}},'Сохранить по ссылке'),el('button',{class:'b g',onclick:()=>fInp.click()},'Загрузить .zip / файл')),
+      avProg&&el('div',{class:'mu',style:'margin-top:8px'},avProg)
     ),
     el('div',{class:'card'},
       el('model-viewer',{
