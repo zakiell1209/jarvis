@@ -348,6 +348,36 @@ function vPC(){
   let pcLog='Ожидание подключения...';
   const logDiv=el('div',{class:'ans mu',style:'margin-top:8px'},pcLog);
   
+  async function autoConnectPC(){
+    const savedIp = ipInp.value.trim();
+    const subnets = savedIp ? [savedIp.split(':')[0]] : ['192.168.43.1', '192.168.43.15', '192.168.1.2', '10.0.2.2'];
+    pcLog='Сканирование сети точки доступа...'; render();
+    for(const base of subnets){
+      const cleanBase = base.includes(':') ? base.split(':')[0] : base;
+      const parts = cleanBase.split('.');
+      if(parts.length!==4) continue;
+      const prefix = parts.slice(0,3).join('.');
+      for(let i=1; i<30; i++){
+        const testIp = prefix+'.'+i+':8080';
+        try{
+          const ctrl = new AbortController();
+          const tm = setTimeout(()=>ctrl.abort(), 400);
+          const res = await fetch('http://'+testIp, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({command:'ping'}), signal:ctrl.signal});
+          clearTimeout(tm);
+          if(res.ok){
+            ipInp.value = testIp;
+            localStorage.setItem('jv_pc_ip', testIp);
+            pcLog='Автоматически подключено к ПК: '+testIp;
+            render();
+            return;
+          }
+        }catch(e){}
+      }
+    }
+    pcLog='ПК не найден в сети точки доступа. Укажите IP вручную.';
+    render();
+  }
+  
   const sendCmd=async(cmd)=>{
     const ip=ipInp.value.trim();
     if(!ip){alert('Введите IP-адрес ПК');return;}
@@ -372,8 +402,9 @@ function vPC(){
       el('div',{class:'mu',style:'margin-top:4px'},'Включите на телефоне «Точку доступа Wi-Fi». Подключите ноутбук к этой точке. Укажите IP-адрес локального сервера Unity (например, на C# / HttpListener).'),
       ipInp,
       el('div',{class:'row'},
-        el('button',{class:'b',onclick:()=>sendCmd('ping')},'Проверить связь'),
-        el('button',{class:'b g',onclick:()=>sendCmd('sync_state')},'Синхронизировать станцию')
+        el('button',{class:'b',onclick:autoConnectPC},'Автоподключение'),
+        el('button',{class:'b g',onclick:()=>sendCmd('ping')},'Проверить связь'),
+        el('button',{class:'b g',onclick:()=>sendCmd('sync_state')},'Синхронизировать')
       ),
       logDiv
     )
