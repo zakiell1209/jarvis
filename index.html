@@ -343,6 +343,9 @@ function vFiles(){
 }
 function vPC(){
   const ipInp=el('input',{placeholder:'IP-адрес ПК в точке доступа, например: 192.168.43.15:8080'});
+  const cmdInp=el('input',{placeholder:'Команда, текст для печати или путь к программе'});
+  const xInp=el('input',{placeholder:'X коорд.'});
+  const yInp=el('input',{placeholder:'Y коорд.'});
   ipInp.value=ld('jv_pc_ip','');
   ipInp.onchange=()=>localStorage.setItem('jv_pc_ip',ipInp.value.trim());
   let pcLog='Ожидание подключения...';
