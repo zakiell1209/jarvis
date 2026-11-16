@@ -341,10 +341,48 @@ function vFiles(){
   if(fok&&!fl.length&&!fprog)out.push(el('div',{class:'card mu'},'Файлов пока нет.'));
   return out;
 }
+function vPC(){
+  const ipInp=el('input',{placeholder:'IP-адрес ПК в точке доступа, например: 192.168.43.15:8080'});
+  ipInp.value=ld('jv_pc_ip','');
+  ipInp.onchange=()=>localStorage.setItem('jv_pc_ip',ipInp.value.trim());
+  let pcLog='Ожидание подключения...';
+  const logDiv=el('div',{class:'ans mu',style:'margin-top:8px'},pcLog);
+  
+  const sendCmd=async(cmd)=>{
+    const ip=ipInp.value.trim();
+    if(!ip){alert('Введите IP-адрес ПК');return;}
+    pcLog='Отправка команды на '+(ip.startsWith('http')?ip:'http://'+ip)+'...'; render();
+    try{
+      const r=await fetch((ip.startsWith('http')?ip:'http://'+ip),{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({command:cmd, source:'Jarvis-Phone'})
+      });
+      const j=await r.json().catch(()=>({status:r.status}));
+      pcLog='Ответ от ПК/Unity:\n'+JSON.stringify(j,null,2);
+    }catch(e){
+      pcLog='Ошибка подключения: '+e.message+'\nУбедитесь, что ПК подключен к Wi-Fi точке доступа телефона и запущен сервер Unity/приложения.';
+    }
+    render();
+  };
+
+  return [
+    el('div',{class:'card'},
+      el('b',null,'Беспроводное подключение к ПК (Unity / Локальная сеть)'),
+      el('div',{class:'mu',style:'margin-top:4px'},'Включите на телефоне «Точку доступа Wi-Fi». Подключите ноутбук к этой точке. Укажите IP-адрес локального сервера Unity (например, на C# / HttpListener).'),
+      ipInp,
+      el('div',{class:'row'},
+        el('button',{class:'b',onclick:()=>sendCmd('ping')},'Проверить связь'),
+        el('button',{class:'b g',onclick:()=>sendCmd('sync_state')},'Синхронизировать станцию')
+      ),
+      logDiv
+    )
+  ];
+}
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
   $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['room','Комната'],['avatar','Аватар'],['pc','ПК/Unity'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,room:vRoom,avatar:vAvatar,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,room:vRoom,avatar:vAvatar,pc:vPC,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
 try{parent.postMessage('jv-ready','*')}catch(e){}
