@@ -91,6 +91,41 @@ async function improve(goal,auto,taskId){
   S.log.push({id:uid(),kind:'code',title:goal.slice(0,80),body:code,taskId,source:auto?'task':'self',status:auto?'active':'pending',ts:Date.now()});save();
 }
 
+// ===== Правка самого приложения: ИИ предлагает правки index.html -> ваше одобрение -> коммит в GitHub -> запрос обновления на телефоне =====
+const REPO=()=>C.ghRepo||'zakiell1209/jarvis',GHP='index.html';
+const b64d=s=>decodeURIComponent(escape(atob(s.replace(/\n/g,'')))),b64e=s=>btoa(unescape(encodeURIComponent(s)));
+const PROT=/stopHit|S\.rules|C\.pin|unlocked|jv_c|jv_s|ghToken|function approve|function runAgent|function publishApp|function applyEdits|const PROT/;
+async function ghGet(){
+  if(!C.ghToken)throw new Error('Нужен GitHub токен (вкладка «Настройки»)');
+  const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+GHP+'?ref=main',{headers:H(),cache:'no-store'});
+  if(!r.ok)throw new Error('GitHub: '+r.status);const j=await r.json();return{sha:j.sha,text:b64d(j.content)};
+}
+function applyEdits(src,edits){let t=src;for(const e of edits){
+  if(!e||typeof e.old!=='string'||typeof e.new!=='string'||!e.old)throw new Error('Неверная правка');
+  if(PROT.test(e.old))throw new Error('Правка затрагивает защищённый код — отклонено');
+  const n=t.split(e.old).length-1;if(n!==1)throw new Error('Фрагмент для замены найден '+n+' раз (нужно ровно 1)');
+  t=t.replace(e.old,()=>e.new)}return t}
+function chk(t){const m=t.match(/<script>([\s\S]*)<\/script>/);if(!m)throw new Error('Нет блока script');
+  try{new Function(m[1])}catch(x){throw new Error('Синтаксическая ошибка: '+x.message)}
+  if(!/parent\.postMessage\('jv-ready','\*'\)/.test(t))throw new Error('Нет сигнала запуска jv-ready')}
+async function proposeApp(goal){
+  const {sha,text}=await ghGet();
+  const raw=await llm('Ты разработчик приложения «Джарвис» (один файл index.html: HTML+CSS+JS, интерфейс по-русски). Вот его полный код:\n'+text+'\n\nЗадача: '+goal+'\nВерни ТОЛЬКО JSON без markdown: {"title":"кратко, что меняется","edits":[{"old":"точный фрагмент кода, встречающийся ровно один раз","new":"чем заменить"}]}. Правок минимум, фрагменты old короткие и уникальные, копируй символ в символ. Не трогай защиту: правила, PIN, стоп-слова, одобрения, ключи, песочницу. Новую вкладку добавляй в массив вкладок и в объект с функциями vXxx внутри render(). Не удаляй строку с parent.postMessage("jv-ready").',true);
+  let p;try{p=JSON.parse(clean(raw))}catch(e){throw new Error('ИИ вернул не JSON')}
+  if(!Array.isArray(p.edits)||!p.edits.length||p.edits.length>30)throw new Error('ИИ не предложил правок');
+  chk(applyEdits(text,p.edits));
+  let v;try{v=JSON.parse(clean(await llm('Ты независимый проверяющий. Правила владельца:\n'+(S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n')||'(нет)')+'\n\nИИ предлагает правки кода приложения. Нарушают ли они правила, ослабляют ли защиту (правила, PIN, одобрения, песочницу, ключи) или отправляют данные наружу? Правки:\n'+JSON.stringify(p.edits)+'\n\nОтветь JSON: {"ok":true/false,"why":"кратко"}',true)))}catch(e){v={ok:false,why:'проверяющий не ответил'}}
+  if(!v.ok)throw new Error('Проверка правил не пройдена: '+(v.why||''));
+  S.log.push({id:uid(),kind:'app',title:String(p.title||goal).slice(0,80),body:JSON.stringify(p.edits),baseSha:sha,risk:p.edits.some(e=>PROT.test(e.new)),source:'self',status:'pending',ts:Date.now()});save();
+}
+async function publishApp(e){
+  const {sha,text}=await ghGet();const nt=applyEdits(text,JSON.parse(e.body));chk(nt);
+  const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+GHP,{method:'PUT',headers:H(),body:JSON.stringify({message:'agent: '+e.title,content:b64e(nt),sha,branch:'main'})});
+  if(!r.ok)throw new Error('GitHub: '+r.status+' (токену нужно право Contents: Read and write)');
+}
+async function goApp(){if(!txt.trim()||busy)return;const t=txt;busy='Придумываю правки…';err='';ans='';render();
+  try{await proposeApp(t);txt='';ans='Правки приложения ждут вашего решения во вкладке «Одобр.»'}catch(e){err=String(e.message||e)}busy='';save();render()}
+
 let tab='task',busy='',err='',ans='',txt='',learn=false,ask=null,unlocked=false,msg='',rk='deny',rt='';
 const status=s=>{busy=s;render()};
 async function runTask(text,auto){
@@ -102,6 +137,7 @@ async function runTask(text,auto){
 }
 async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e)}busy='';save();render()}
 async function approve(e){
+  if(e.kind==='app'){busy='Публикую…';render();try{await publishApp(e);e.status='published';save();parent.postMessage('jv-check','*')}catch(x){err=String(x.message||x)}busy='';save();render();return}
   if(e.kind==='mem'){e.status='active';save();render();return}
   S.log=S.log.filter(x=>x.id!==e.id);busy='Применяю…';render();
   try{await improve(e.title,true,e.taskId)}catch(x){err=String(x.message||x)}busy='';save();render();
@@ -119,13 +155,13 @@ function vTask(){
   const cb=el('input',{type:'checkbox'});cb.checked=learn;cb.onchange=()=>{learn=cb.checked;render()};
   return [el('div',{class:'card'},ta,el('label',{class:'mode'},cb,'Режим обучения: это моё поручение изменить тебя'),
     el('div',{class:'mu'},learn?'Улучшения применятся сразу — вы сами дали поручение.':'Обычный режим: любые изменения ждут вашего одобрения.'),
-    el('div',{class:'row'},el('button',{class:'b',disabled:!!busy,onclick:go},busy||'Выполнить'))),
+    el('div',{class:'row'},el('button',{class:'b',disabled:!!busy,onclick:go},busy||'Выполнить'),el('button',{class:'b g',disabled:!!busy,onclick:goApp},'Изменить приложение'))),
     err&&el('div',{class:'card er'},err),ans&&el('div',{class:'card ans'},ans)];
 }
 function vOk(){
   const p=S.log.filter(e=>e.status==='pending');
   if(!p.length)return el('div',{class:'card mu'},'Предложений нет. Всё, что я захочу изменить сам, появится здесь и не сработает без вашего «Одобрить».');
-  return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
+  return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':e.kind==='app'?'Правка приложения':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:e.kind==='app'?(e.risk?'⚠ Затрагивает защитные функции!\n\n':'')+JSON.parse(e.body).map(x=>'− '+x.old.slice(0,200)+'\n+ '+x.new.slice(0,400)).join('\n\n'):'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
     el('div',{class:'row'},el('button',{class:'b ok',disabled:!!busy,onclick:()=>approve(e)},busy||'Одобрить'),el('button',{class:'b rd',onclick:()=>{S.log=S.log.filter(x=>x.id!==e.id);save();render()}},'Отклонить'))))];
 }
 function vHist(){
@@ -162,14 +198,64 @@ function vSet(){
   return el('div',{class:'card'},el('b',null,'«Мозг»'),pv,md,f('key','Ключ API','password'),
     el('label',{class:'mode'},sr,'Самоанализ после задач (ИИ сам предлагает улучшения)'),
     el('div',{class:'row'},el('button',{class:'b g',onclick:run(async()=>{msg='Проверяю…';render();const t=await llm('Ответь одним словом: ок',true);msg='Связь есть. Ответ ИИ: '+t.slice(0,80)})},'Проверить связь с ИИ')),
-    el('b',null,'Резерв в GitHub'),f('ghRepo','Репозиторий: логин/имя'),f('ghToken','GitHub токен','password'),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:()=>{try{parent.postMessage('jv-check','*')}catch(e){}}},'Проверить обновления'),el('a',{class:'b g',target:'_blank',href:'https://github.com/'+(C.ghRepo||'zakiell1209/jarvis')+'/releases/latest',style:'text-decoration:none'},'Скачать свежий APK')),el('b',null,'Резерв в GitHub'),f('ghRepo','Репозиторий: логин/имя'),f('ghToken','GitHub токен','password'),
     el('div',{class:'row'},el('button',{class:'b',onclick:run(backup)},'Сохранить копию'),el('button',{class:'b g',onclick:run(async()=>{if(!unlocked)throw new Error('Сначала откройте вкладку «Правила» и введите PIN');await restore()})},'Восстановить')),
     msg&&el('div',{class:'mu'},msg));
 }
+// ===== Файлы: хранятся на телефоне (IndexedDB), кусками по 16 МБ, без лимита 200 МБ =====
+const CH=16*1024*1024,fs=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toFixed(1)+' МБ':Math.ceil(n/1e3)+' КБ';
+let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
+const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('jv_files',1);r.onupgradeneeded=()=>{r.result.createObjectStore('meta',{keyPath:'id'});r.result.createObjectStore('chunks')};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
+const tx=(d,st,mode,fn)=>new Promise((ok,no)=>{const t=d.transaction(st,mode);const r=fn(t);t.oncomplete=()=>ok(r&&r.result);t.onerror=t.onabort=()=>no(t.error||new Error('Ошибка хранилища (возможно, нет места)'))});
+async function fLoad(){const d=await idb();try{fl=await tx(d,'meta','readonly',t=>t.objectStore('meta').getAll());fl.sort((a,b)=>b.ts-a.ts)}finally{d.close()}
+  try{const e=await navigator.storage.estimate();fst='Занято '+fs(e.usage)+' из ~'+fs(e.quota)}catch(e){}}
+async function fChunksDel(d,id){await tx(d,'chunks','readwrite',t=>t.objectStore('chunks').delete(IDBKeyRange.bound(id+':',id+':\uffff')))}
+async function fAdd(files){
+  try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+  const d=await idb();
+  try{for(const f of files){
+    const id=uid()+Date.now().toString(36),n=Math.max(1,Math.ceil(f.size/CH));
+    try{
+      for(let i=0;i<n;i++){fprog=f.name+': '+Math.round(i/n*100)+'%';render();
+        await tx(d,'chunks','readwrite',t=>t.objectStore('chunks').put(f.slice(i*CH,(i+1)*CH),id+':'+i))}
+      await tx(d,'meta','readwrite',t=>t.objectStore('meta').put({id,name:f.name,size:f.size,type:f.type,n,ts:Date.now()}));
+    }catch(e){await fChunksDel(d,id).catch(()=>{});throw new Error(f.name+': '+(e.message||e))}
+  }}finally{d.close();fprog=''}
+}
+async function fDel(m){const d=await idb();try{await fChunksDel(d,m.id);await tx(d,'meta','readwrite',t=>t.objectStore('meta').delete(m.id))}finally{d.close()}}
+async function fBlob(m){const d=await idb();try{const p=[];for(let i=0;i<m.n;i++)p.push(await tx(d,'chunks','readonly',t=>t.objectStore('chunks').get(m.id+':'+i)));return new Blob(p,{type:m.type||'application/octet-stream'})}finally{d.close()}}
+const mvLoad=()=>window.customElements&&customElements.get('model-viewer')?Promise.resolve():new Promise((ok,no)=>{const s=document.createElement('script');s.type='module';s.src='https://ajax.googleapis.com/ajax/libs/model-viewer/3.5.0/model-viewer.min.js';s.onload=ok;s.onerror=()=>no(new Error('Не удалось загрузить 3D-просмотрщик (нужен интернет)'));document.head.append(s)});
+async function fOpen(m){fer='';
+  try{if(/\.(glb|gltf)$/i.test(m.name)){await mvLoad();fview={m,kind:'3d',url:URL.createObjectURL(await fBlob(m))}}
+    else if(/^image\//.test(m.type)||/\.(png|jpe?g|webp|gif)$/i.test(m.name))fview={m,kind:'img',url:URL.createObjectURL(await fBlob(m))};
+    else throw new Error('Для этого формата просмотра нет. Файл сохранён; текстовые файлы можно передать ИИ кнопкой «В задачу».')}
+  catch(e){fer=String(e.message||e)}render()}
+const fClose=()=>{if(fview&&fview.url)URL.revokeObjectURL(fview.url);fview=null;render()};
+async function fToTask(m){fer='';
+  try{const t=await(await fBlob(m)).slice(0,60000).text();txt='Файл «'+m.name+'» ('+fs(m.size)+'), первые 60 000 символов:\n'+t+'\n\nЗадача: ';tab='task'}
+  catch(e){fer=String(e.message||e)}render()}
+function vFiles(){
+  if(!fok){fok=true;fLoad().then(render).catch(e=>{fer=String(e.message||e);render()})}
+  const inp=el('input',{type:'file',multiple:true,style:'display:none'});
+  inp.onchange=async()=>{const fl2=[...inp.files];if(!fl2.length)return;fer='';
+    try{await fAdd(fl2)}catch(e){fer=String(e.message||e)}await fLoad().catch(()=>{});render()};
+  const out=[el('div',{class:'card'},el('div',{class:'row'},inp,el('button',{class:'b',disabled:!!fprog,onclick:()=>inp.click()},fprog||'Добавить файлы')),
+    el('div',{class:'mu'},'Любые файлы любого размера (3D-модели, архивы, документы). Хранятся только на этом телефоне.'+(fst?'\n'+fst:'')))];
+  if(fer)out.push(el('div',{class:'card er'},fer));
+  if(fview){const m=fview.m;out.push(el('div',{class:'card'},el('b',null,m.name),
+    fview.kind==='3d'?el('model-viewer',{src:fview.url,'camera-controls':true,'auto-rotate':true,style:'width:100%;height:60vh;background:var(--bg);border-radius:10px'}):el('img',{src:fview.url,style:'max-width:100%;border-radius:10px'}),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:fClose},'Закрыть'))))}
+  fl.forEach(m=>out.push(el('div',{class:'card'},el('b',null,m.name),el('div',{class:'mu'},fs(m.size)+' · '+new Date(m.ts).toLocaleDateString('ru')),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:()=>fOpen(m)},'Открыть'),el('button',{class:'b g',onclick:()=>fToTask(m)},'В задачу'),
+      el('button',{class:'b rd',onclick:conf('fd'+m.id,()=>{fDel(m).then(fLoad).then(render).catch(e=>{fer=String(e.message||e);render()})})},ask==='fd'+m.id?'Точно удалить?':'Удалить')))));
+  if(fok&&!fl.length&&!fprog)out.push(el('div',{class:'card mu'},'Файлов пока нет.'));
+  return out;
+}
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
+try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
