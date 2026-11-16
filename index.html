@@ -208,6 +208,46 @@ const CH=16*1024*1024,fs=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toF
 let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
 let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb'), avProg='';
 async function applyBgImage(){try{const d=await idb();const all=await tx(d,'meta','readonly',t=>t.objectStore('meta').getAll());const imgMeta=all.find(m=>/^image\//.test(m.type)||/\.jpe?g$/i.test(m.name));if(imgMeta){const blob=await fBlob(imgMeta);document.body.style.backgroundImage='url('+URL.createObjectURL(blob)+')'}d.close();}catch(e){}}applyBgImage();
+function vRoom(){
+  const fInp=el('input',{type:'file',accept:'.zip,.glb,.gltf',style:'display:none'});
+  fInp.onchange=async()=>{
+    const f=fInp.files[0];if(!f)return;
+    try{
+      if(/\.zip$/i.test(f.name)){
+        const JSZip=(await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
+        const zip=new JSZip();
+        const z=await zip.loadAsync(f);
+        let glbF=null;for(const fn of Object.keys(z.files)){if(/\.(glb|gltf)$/i.test(fn)){glbF=z.files[fn];break;}}
+        if(!glbF)throw new Error('В ZIP нет .glb или .gltf файла');
+        const blob=await glbF.async('blob');
+        avUrl=URL.createObjectURL(blob);save();render();
+      }else{
+        avUrl=URL.createObjectURL(f);save();render();
+      }
+    }catch(e){alert('Ошибка загрузки модели: '+e.message);}
+  };
+  return [
+    el('div',{class:'card'},
+      el('b',null,'Комната аватара'),
+      fInp,
+      el('div',{class:'row'},el('button',{class:'b',onclick:()=>fInp.click()},'Выбрать .glb/.gltf/.zip файл из телефона')),
+      el('div',{class:'mu',style:'margin-top:6px'},'Загрузите модель, и она сразу появится ниже для взаимодействия.')
+    ),
+    el('div',{class:'card'},
+      el('model-viewer',{
+        src:avUrl,
+        'camera-controls':true,
+        'auto-rotate':true,
+        'animation-name':'*',
+        'autoplay':'',
+        'shadow-intensity':'1',
+        'interaction-prompt':'none',
+        'ar':'',
+        style:'width:100%;height:65vh;background:var(--bg);border-radius:10px'
+      })
+    )
+  ];
+}
 function vAvatar(){
   const inp=el('input',{placeholder:'Ссылка на .glb или .gltf модель'});inp.value=avUrl;
   const fInp=el('input',{type:'file',accept:'.zip,.glb,.gltf',style:'display:none'});
@@ -302,8 +342,8 @@ function vFiles(){
 }
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['avatar','Аватар'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,avatar:vAvatar,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['room','Комната'],['avatar','Аватар'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,room:vRoom,avatar:vAvatar,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
 try{parent.postMessage('jv-ready','*')}catch(e){}
