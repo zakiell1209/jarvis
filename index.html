@@ -346,11 +346,13 @@ function vFiles(){
   if(fok&&!fl.length&&!fprog)out.push(el('div',{class:'card mu'},'Файлов пока нет.'));
   return out;
 }
-const PCF=()=>{const p=window.parent;return p&&p.fetch?p.fetch.bind(p):fetch};
 async function pcCall(action,data){
   if(!C.pcIp||!C.pcTok)throw new Error('Укажите адрес и токен моста во вкладке «ПК»');
-  const r=await PCF()(C.pcIp.startsWith('http')?C.pcIp:'http://'+C.pcIp,{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis-Token':C.pcTok},body:JSON.stringify({action,data:data||{}})});
-  const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||'ПК: '+r.status);return j}
+  const url=C.pcIp.startsWith('http')?C.pcIp:'http://'+C.pcIp,hd={'Content-Type':'application/json','X-Jarvis-Token':C.pcTok},body={action,data:data||{}};
+  const N=CAP()&&CAP().Plugins&&CAP().Plugins.CapacitorHttp;let st,j;
+  if(N){const r=await N.request({url,method:'POST',headers:hd,data:body,connectTimeout:15000,readTimeout:300000});st=r.status;j=typeof r.data==='string'?JSON.parse(r.data):r.data}
+  else{const r=await fetch(url,{method:'POST',headers:hd,body:JSON.stringify(body)});st=r.status;j=await r.json()}
+  if(st>=400||(j&&j.error))throw new Error((j&&j.error)||'ПК: '+st);return j}
 const CAP=()=>{const p=window.parent;return(p&&p.Capacitor)||window.Capacitor};
 async function phoneFs(op,path,text){
   const F=CAP()&&CAP().Plugins&&CAP().Plugins.Filesystem;if(!F)throw new Error('Плагин файлов недоступен (нужен свежий APK)');
