@@ -158,10 +158,20 @@ const conf=(k,fn)=>()=>{if(ask===k){ask=null;fn();render()}else{ask=k;render();s
 function el(t,p,...c){const e=document.createElement(t);for(const k in p||{}){if(k==='class')e.className=p[k];else if(k.slice(0,2)==='on')e[k]=p[k];else if(p[k]===false)continue;else e.setAttribute(k,p[k]===true?'':p[k])}c.flat().forEach(x=>{if(x!=null&&x!==false)e.append(x)});return e}
 function vTask(){
   const ta=el('textarea',{placeholder:'Что сделать? Например: научись составлять планы тренировок'});ta.value=txt;ta.oninput=()=>{txt=ta.value};
+  const micBtn=el('button',{class:'b g',onclick:()=>{
+    try{
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if(!SpeechRecognition) { alert('Распознавание речи не поддерживается'); return; }
+      const rec = new SpeechRecognition();
+      rec.lang = 'ru-RU';
+      rec.onresult = (e) => { txt = e.results[0][0].transcript; render(); };
+      rec.start();
+    }catch(e){ alert('Ошибка микрофона: '+e.message); }
+  }},'🎤 Голос');
   const cb=el('input',{type:'checkbox'});cb.checked=learn;cb.onchange=()=>{learn=cb.checked;render()};
   return [el('div',{class:'card'},ta,el('label',{class:'mode'},cb,'Режим обучения: это моё поручение изменить тебя'),
     el('div',{class:'mu'},learn?'Улучшения применятся сразу — вы сами дали поручение.':'Обычный режим: любые изменения ждут вашего одобрения.'),
-    el('div',{class:'row'},el('button',{class:'b',disabled:!!busy,onclick:go},busy||'Выполнить'),el('button',{class:'b g',disabled:!!busy,onclick:goApp},'Изменить приложение'))),
+    el('div',{class:'row'},el('button',{class:'b',disabled:!!busy,onclick:go},busy||'Выполнить'),el('button',{class:'b g',disabled:!!busy,onclick:goApp},'Изменить приложение'),micBtn)),
     err&&el('div',{class:'card er'},err),ans&&el('div',{class:'card ans'},ans)];
 }
 function vOk(){
