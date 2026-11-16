@@ -75,13 +75,17 @@ function runAgent(code,task,api){return new Promise((res,rej)=>{
 
 const mkApi=(id,auto)=>({
   llm:p=>llm(String(p)),
+  say:async t=>say(t),
+  pc:async(a,d)=>{if(!C.allowPC)throw new Error('Доступ к ПК выключен владельцем');return pcCall(String(a),d)},
+  phone:async(op,path,t)=>{if(!C.allowPhone)throw new Error('Доступ к файлам телефона выключен владельцем');
+    if(op==='write'&&!confirm('Джарвис хочет записать файл на телефон:\n'+path))throw new Error('Владелец отклонил запись');return phoneFs(op,String(path),t)},
   memory:async()=>S.log.filter(e=>e.kind==='mem'&&e.status==='active').map(e=>({title:e.title,text:e.body})),
   remember:async(t,x)=>{S.log.push({id:uid(),kind:'mem',title:String(t).slice(0,80),body:String(x).slice(0,2000),taskId:id,source:auto?'task':'self',status:auto?'active':'pending',ts:Date.now()});save()}
 });
 
 // Улучшение кода: проверка → тест → судья → применение (сразу, если поручение ваше) или в «Одобрения»
 async function improve(goal,auto,taskId){
-  const raw=await llm('Ты разработчик ИИ-помощника. Вот его текущий код (JavaScript):\n'+curCode()+'\n\nДоступные функции: api.llm(prompt) -> строка; api.memory() -> [{title,text}]; api.remember(title,text). Нет доступа к сети, DOM и хранилищу. Код обязан определять async function handle(task, api), которая при task==="__ping__" возвращает строку "ok", а иначе возвращает текстовый ответ. Цель улучшения: '+goal+'\nВерни ТОЛЬКО полный новый код без пояснений и без markdown.');
+  const raw=await llm('Ты разработчик ИИ-помощника. Вот его текущий код (JavaScript):\n'+curCode()+'\n\nДоступные функции: api.llm(prompt) -> строка; api.memory() -> [{title,text}]; api.remember(title,text); api.say(text) озвучить; api.pc(action,data) действия на ПК (shell/python/blender/unity/read/write/ls), если разрешено владельцем; api.phone(op,path,text) файлы телефона (ls/read/write). Нет доступа к сети, DOM и хранилищу. Код обязан определять async function handle(task, api), которая при task==="__ping__" возвращает строку "ok", а иначе возвращает текстовый ответ. Цель улучшения: '+goal+'\nВерни ТОЛЬКО полный новый код без пояснений и без markdown.');
   const code=raw.replace(/^\s*```\w*\n?/,'').replace(/```\s*$/,'').trim();
   if(code.length>30000||!/function\s+handle/.test(code))throw new Error('ИИ выдал некорректный код');
   if(/\b(parent|top|window|document|fetch|XMLHttpRequest|localStorage|sessionStorage|WebSocket|indexedDB|postMessage|eval|Function|importScripts)\b/.test(code))throw new Error('Код содержит запрещённые обращения — отклонено');
@@ -137,7 +141,7 @@ async function runTask(text,auto){
   ans=await runAgent(curCode(),text,mkApi(id,auto));stopHit(ans);
   if(C.selfReview&&!auto){status('Самоанализ…');try{const r=JSON.parse(clean(await llm('Задание: '+text+'\nТвой ответ: '+ans+'\nСтоит ли предложить владельцу улучшение твоего кода? Ответь JSON: {"suggest":true/false,"goal":"что улучшить"}')));if(r.suggest&&r.goal)await improve(String(r.goal),false,id)}catch(e){}}
 }
-async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e)}busy='';save();render()}
+async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);say(ans);txt=''}catch(e){err=String(e.message||e)}busy='';save();render()}
 async function approve(e){
   if(e.kind==='app'){busy='Публикую…';render();try{await publishApp(e);e.status='published';save();parent.postMessage('jv-check','*')}catch(x){err=String(x.message||x)}busy='';save();render();return}
   if(e.kind==='mem'){e.status='active';save();render();return}
@@ -342,77 +346,53 @@ function vFiles(){
   if(fok&&!fl.length&&!fprog)out.push(el('div',{class:'card mu'},'Файлов пока нет.'));
   return out;
 }
+const PCF=()=>{const p=window.parent;return p&&p.fetch?p.fetch.bind(p):fetch};
+async function pcCall(action,data){
+  if(!C.pcIp||!C.pcTok)throw new Error('Укажите адрес и токен моста во вкладке «ПК»');
+  const r=await PCF()(C.pcIp.startsWith('http')?C.pcIp:'http://'+C.pcIp,{method:'POST',headers:{'Content-Type':'application/json','X-Jarvis-Token':C.pcTok},body:JSON.stringify({action,data:data||{}})});
+  const j=await r.json();if(!r.ok||j.error)throw new Error(j.error||'ПК: '+r.status);return j}
+const CAP=()=>{const p=window.parent;return(p&&p.Capacitor)||window.Capacitor};
+async function phoneFs(op,path,text){
+  const F=CAP()&&CAP().Plugins&&CAP().Plugins.Filesystem;if(!F)throw new Error('Плагин файлов недоступен (нужен свежий APK)');
+  const o={path,directory:'EXTERNAL_STORAGE'};
+  if(op==='ls')return(await F.readdir(o)).files.map(f=>f.name+(f.type==='directory'?'/':'')).join('\n');
+  if(op==='read')return String((await F.readFile({...o,encoding:'utf8'})).data).slice(0,100000);
+  if(op==='write'){await F.writeFile({...o,data:String(text),encoding:'utf8',recursive:true});return 'ok'}
+  throw new Error('Неизвестная операция')}
+// Голос: низкий, медленный, «механический» (оригинальный голос персонажа из фильма не копируется)
+function say(t){try{if(!C.voice||!t)return;const u=new SpeechSynthesisUtterance(String(t).slice(0,600));
+  u.voice=speechSynthesis.getVoices().find(v=>/^ru/i.test(v.lang))||null;u.lang='ru-RU';u.pitch=0.1;u.rate=0.8;speechSynthesis.cancel();speechSynthesis.speak(u)}catch(e){}}
+const stripCode=t=>t.replace(/^\s*```\w*\n?/,'').replace(/```\s*$/,'').trim();
+// Цикл обучения: пишет скрипт -> запускает на ПК -> читает результат -> исправляет (до 5 попыток) -> запоминает рабочий рецепт
+async function pcLoop(goal,kind,log){
+  const sys={blender:'Python-скрипт Blender (bpy), запуск: blender -b -P',unity:'C#-скрипт: using UnityEditor; public static class JarvisRun{public static void Go(){...}}',python:'Python 3 скрипт'}[kind];
+  let hist='',r;
+  for(let i=1;i<=5;i++){
+    log('Попытка '+i+': пишу скрипт…');
+    const code=stripCode(await llm('Ты пишешь '+sys+'. Цель: '+goal+'\n'+(hist?'Прошлые попытки:\n'+hist+'\nИсправь ошибки.\n':'')+'Результат проверки печатай (print / Debug.Log). Верни ТОЛЬКО код.'));
+    log('Попытка '+i+': запускаю на ПК (подтвердите там)…');
+    r=await pcCall(kind,{code});
+    hist+=code.slice(0,1500)+'\n→ '+JSON.stringify(r).slice(0,1500)+'\n';
+    let v;try{v=JSON.parse(clean(await llm('Цель: '+goal+'\nРезультат запуска: '+JSON.stringify(r).slice(0,2000)+'\nЦель достигнута? JSON {"done":true/false}',true)))}catch(e){v={}}
+    if(v.done){S.log.push({id:uid(),kind:'mem',title:('Рецепт '+kind+': '+goal).slice(0,80),body:code.slice(0,1900),source:'self',status:'active',ts:Date.now()});save();return 'Готово с попытки '+i+'. Рабочий скрипт сохранён в память.\n'+JSON.stringify(r).slice(0,800)}}
+  return 'Не вышло за 5 попыток. Последний результат:\n'+JSON.stringify(r).slice(0,1200)}
+async function portPy(){
+  const code=stripCode(await llm('Перепиши логику этого ИИ-агента (JavaScript) на Python 3 в виде консольной программы с requests; сохрани подтверждение владельцем любых изменений кода. Верни ТОЛЬКО код.\n'+curCode()));
+  await pcCall('write',{path:'jarvis_py/agent.py',text:code});return 'Записано на ПК: jarvis_py/agent.py'}
 function vPC(){
-  const ipInp=el('input',{placeholder:'IP-адрес ПК в точке доступа, например: 192.168.43.15:8080'});
-  const cmdInp=el('input',{placeholder:'Команда, текст для печати или путь к программе'});
-  const xInp=el('input',{placeholder:'X коорд.'});
-  const yInp=el('input',{placeholder:'Y коорд.'});
-  ipInp.value=ld('jv_pc_ip','');
-  ipInp.onchange=()=>localStorage.setItem('jv_pc_ip',ipInp.value.trim());
-  let pcLog='Ожидание подключения...';
-  const logDiv=el('div',{class:'ans mu',style:'margin-top:8px'},pcLog);
-  
-  async function autoConnectPC(){
-    const savedIp = ipInp.value.trim();
-    const subnets = savedIp ? [savedIp.split(':')[0]] : ['192.168.43.1', '192.168.43.15', '192.168.1.2', '10.0.2.2'];
-    pcLog='Сканирование сети точки доступа...'; render();
-    for(const base of subnets){
-      const cleanBase = base.includes(':') ? base.split(':')[0] : base;
-      const parts = cleanBase.split('.');
-      if(parts.length!==4) continue;
-      const prefix = parts.slice(0,3).join('.');
-      for(let i=1; i<30; i++){
-        const testIp = prefix+'.'+i+':8080';
-        try{
-          const ctrl = new AbortController();
-          const tm = setTimeout(()=>ctrl.abort(), 400);
-          const res = await fetch('http://'+testIp, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({command:'ping'}), signal:ctrl.signal});
-          clearTimeout(tm);
-          if(res.ok){
-            ipInp.value = testIp;
-            localStorage.setItem('jv_pc_ip', testIp);
-            pcLog='Автоматически подключено к ПК: '+testIp;
-            render();
-            return;
-          }
-        }catch(e){}
-      }
-    }
-    pcLog='ПК не найден в сети точки доступа. Укажите IP вручную.';
-    render();
-  }
-  
-  const sendCmd=async(cmd)=>{
-    const ip=ipInp.value.trim();
-    if(!ip){alert('Введите IP-адрес ПК');return;}
-    pcLog='Отправка команды на '+(ip.startsWith('http')?ip:'http://'+ip)+'...'; render();
-    try{
-      const r=await fetch((ip.startsWith('http')?ip:'http://'+ip),{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({command:cmd, source:'Jarvis-Phone'})
-      });
-      const j=await r.json().catch(()=>({status:r.status}));
-      pcLog='Ответ от ПК/Unity:\n'+JSON.stringify(j,null,2);
-    }catch(e){
-      pcLog='Ошибка подключения: '+e.message+'\nУбедитесь, что ПК подключен к Wi-Fi точке доступа телефона и запущен сервер Unity/приложения.';
-    }
-    render();
-  };
-
-  return [
-    el('div',{class:'card'},
-      el('b',null,'Беспроводное подключение к ПК (Unity / Локальная сеть)'),
-      el('div',{class:'mu',style:'margin-top:4px'},'Включите на телефоне «Точку доступа Wi-Fi». Подключите ноутбук к этой точке. Укажите IP-адрес локального сервера Unity (например, на C# / HttpListener).'),
-      ipInp,
-      el('div',{class:'row'},
-        el('button',{class:'b',onclick:autoConnectPC},'Автоподключение'),
-        el('button',{class:'b g',onclick:()=>sendCmd('ping')},'Проверить связь'),
-        el('button',{class:'b g',onclick:()=>sendCmd('sync_state')},'Синхронизировать')
-      ),
-      logDiv
-    )
-  ];
+  let out='Мост: python pc_bridge.py на ПК. Включите точку доступа, подключите ПК и введите адрес и токен из консоли.';
+  const box=el('div',{class:'ans mu',style:'margin-top:8px'},out),log=t=>{out=t;box.textContent=t};
+  const f=(k,ph,ty)=>{const i=el('input',{type:ty||'text',placeholder:ph});i.value=C[k]||'';i.onchange=()=>{C[k]=i.value.trim();save()};return i};
+  const cb=(k,l)=>{const c=el('input',{type:'checkbox'});c.checked=!!C[k];c.onchange=()=>{C[k]=c.checked;save()};return el('label',{class:'mode'},c,l)};
+  const goal=el('textarea',{placeholder:'Задача для Unity / Blender / Python'}),kind=el('select',null,el('option',{value:'blender'},'Blender'),el('option',{value:'unity'},'Unity'),el('option',{value:'python'},'Python'));
+  const act=(fn)=>async()=>{try{log('Работаю…');log(await fn())}catch(e){log('Ошибка: '+(e.message||e))}};
+  return [el('div',{class:'card'},el('b',null,'Мост к ПК'),f('pcIp','Адрес, например 192.168.43.15:8080'),f('pcTok','Токен моста','password'),
+    cb('allowPC','Разрешить Джарвису действия на ПК (каждое ещё подтверждается на ПК)'),cb('allowPhone','Разрешить Джарвису файлы телефона'),cb('voice','Озвучивать ответы (низкий голос)'),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:act(async()=>JSON.stringify(await pcCall('ping')))},'Проверить связь'),
+      el('button',{class:'b g',onclick:()=>{C.voice=true;say('Я Джарвис. Системы в норме.')}},'Тест голоса'))),
+    el('div',{class:'card'},kind,goal,el('div',{class:'row'},el('button',{class:'b',onclick:act(()=>{if(!C.allowPC)throw new Error('Включите доступ к ПК');return pcLoop(goal.value,kind.value,log)})},'Выполнить и самоисправляться'),
+      el('button',{class:'b g',onclick:act(()=>{if(!C.allowPC)throw new Error('Включите доступ к ПК');return portPy()})},'Переписать меня на Python'))),
+    el('div',{class:'card'},el('div',{class:'row'},el('button',{class:'b g',onclick:act(()=>{if(!C.allowPhone)throw new Error('Включите файлы телефона');return phoneFs('ls','')})},'Показать файлы телефона')),box)];
 }
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
