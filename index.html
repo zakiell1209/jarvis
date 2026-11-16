@@ -218,7 +218,7 @@ function vSet(){
     el('div',{class:'row'},el('button',{class:'b',onclick:run(backup)},'Сохранить копию'),el('button',{class:'b g',onclick:run(async()=>{if(!unlocked)throw new Error('Сначала откройте вкладку «Правила» и введите PIN');await restore()})},'Восстановить')),
     msg&&el('div',{class:'mu'},msg));
 }
-// ===== Файлы: хранятся на телефоне (IndexedDB), кусками по 16 МБ, без лимита 200 МБ =====
+// [Внедрено]
 const CH=16*1024*1024,fs=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toFixed(1)+' МБ':Math.ceil(n/1e3)+' КБ';
 let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
 let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb'), avProg='';
