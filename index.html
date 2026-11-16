@@ -2,8 +2,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Джарвис</title>
 <style>
-:root{--bg:#dc2626;--cd:rgba(255, 255, 255, 0.88);--tx:#141922;--mu:#667085;--ac:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e3e7ee;color-scheme:light}
-@media(prefers-color-scheme:dark){:root{--bg:#dc2626;--cd:rgba(23, 29, 38, 0.88);--tx:#e8ecf3;--mu:#98a2b3;--ac:#6b95ff;--bd:#283240;color-scheme:dark}}
+:root{--bg:#15803d;--cd:rgba(255, 255, 255, 0.88);--tx:#141922;--mu:#667085;--ac:#2563eb;--ok:#16a34a;--bad:#dc2626;--bd:#e3e7ee;color-scheme:light}
+@media(prefers-color-scheme:dark){:root{--bg:#15803d;--cd:rgba(23, 29, 38, 0.88);--tx:#e8ecf3;--mu:#98a2b3;--ac:#6b95ff;--bd:#283240;color-scheme:dark}}
 body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,sans-serif;background-size:cover;background-position:center;background-attachment:fixed}
 async function applyBgImage(){try{const d=await idb();const all=await tx(d,'meta','readonly',t=>t.objectStore('meta').getAll());const imgMeta=all.find(m=>/^image//.test(m.type)||/\.jpe?g$/i.test(m.name));if(imgMeta){const blob=await fBlob(imgMeta);document.body.style.backgroundImage='url('+URL.createObjectURL(blob)+')'}d.close();}catch(e){}}applyBgImage();
 main{max-width:640px;margin:0 auto;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 90px}
@@ -209,11 +209,23 @@ let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
 let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb');
 function vAvatar(){
   const inp=el('input',{placeholder:'Ссылка на .glb или .gltf модель'});inp.value=avUrl;
+  const fInp=el('input',{type:'file',accept:'.zip,.glb,.gltf',style:'display:none'});
+  fInp.onchange=async()=>{const f=fInp.files[0];if(!f)return;
+    if(/\.zip$/i.test(f.name)){
+      try{const JSZip=(await import('https://cdn.jsdelivr.net/npm/jszip@3.10.1/+esm')).default;
+        const zip=new JSZip();const z=await zip.loadAsync(f);
+        let glbF=null;for(const fn of Object.keys(z.files)){if(/\.(glb|gltf)$/i.test(fn)){glbF=z.files[fn];break;}}
+        if(!glbF)throw new Error('В ZIP нет .glb или .gltf файла');
+        const blob=await glbF.async('blob');avUrl=URL.createObjectURL(blob);save();render();
+      }catch(e){alert('Ошибка чтения ZIP: '+e.message);}
+    }else{avUrl=URL.createObjectURL(f);save();render();}
+  };
   return [
     el('div',{class:'card'},
       el('b',null,'3D Аватар Джарвиса (с анимацией костей и физикой)'),
       inp,
-      el('div',{class:'row'},el('button',{class:'b',onclick:()=>{avUrl=inp.value.trim();save();render()}},'Сохранить и загрузить'))
+      fInp,
+      el('div',{class:'row'},el('button',{class:'b',onclick:()=>{avUrl=inp.value.trim();save();render()}},'Сохранить по ссылке'),el('button',{class:'b g',onclick:()=>fInp.click()},'Загрузить .zip / файл'))
     ),
     el('div',{class:'card'},
       el('model-viewer',{
