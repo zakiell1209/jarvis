@@ -111,7 +111,7 @@ function rollbackTask(id){
 }
 const conf=(k,fn)=>()=>{if(ask===k){ask=null;fn();render()}else{ask=k;render();setTimeout(()=>{if(ask===k){ask=null;render()}},4000)}};
 
-function el(t,p,...c){const e=document.createElement(t);for(const k in p||{}){if(k==='class')e.className=p[k];else if(k.slice(0,2)==='on')e[k]=p[k];else e.setAttribute(k,p[k])}c.flat().forEach(x=>{if(x!=null&&x!==false)e.append(x)});return e}
+function el(t,p,...c){const e=document.createElement(t);for(const k in p||{}){if(k==='class')e.className=p[k];else if(k.slice(0,2)==='on')e[k]=p[k];else if(p[k]===false)continue;else e.setAttribute(k,p[k]===true?'':p[k])}c.flat().forEach(x=>{if(x!=null&&x!==false)e.append(x)});return e}
 function vTask(){
   const ta=el('textarea',{placeholder:'Что сделать? Например: научись составлять планы тренировок'});ta.value=txt;ta.oninput=()=>{txt=ta.value};
   const cb=el('input',{type:'checkbox'});cb.checked=learn;cb.onchange=()=>{learn=cb.checked;render()};
