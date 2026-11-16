@@ -25,23 +25,24 @@ const DEF=`async function handle(task, api){
   return await api.llm('Ты личный ИИ-помощник. Отвечай по-русски, кратко.\\nНавыки:\\n'+skills+'\\nЗадание: '+task);
 }`;
 const ld=(k,d)=>{try{return JSON.parse(localStorage.getItem(k))||d}catch(e){return d}};
-let S=ld('jv_s',{log:[],tasks:[],rules:[]}),C=ld('jv_c',{provider:'gemini',model:'gemini-2.5-flash',key:'',selfReview:true,ghToken:'',ghRepo:'',pin:''});
+let S=ld('jv_s',{log:[],tasks:[],rules:[]}),C=ld('jv_c',{provider:'gemini',model:'gemini-3.6-flash',key:'',selfReview:true,ghToken:'',ghRepo:'',pin:''});
 const save=()=>{localStorage.setItem('jv_s',JSON.stringify(S));localStorage.setItem('jv_c',JSON.stringify(C))};
 const h=async p=>[...new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode('jv|'+p)))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const curCode=()=>{const c=S.log.filter(e=>e.kind==='code'&&e.status==='active');return c.length?c[c.length-1].body:DEF};
 const stopHit=t=>{const r=S.rules.find(r=>r.k==='stop'&&t.toLowerCase().includes(r.t.toLowerCase()));if(r)throw new Error('Заблокировано стоп-словом: '+r.t)};
 
+const ft=(u,o)=>{const c=new AbortController(),t=setTimeout(()=>c.abort(),60000);return fetch(u,{...o,signal:c.signal}).catch(e=>{throw new Error(e.name==='AbortError'?'Нет ответа от сервера ИИ за 60 секунд (проверьте интернет, ключ и название модели)':'Сеть: '+e.message)}).finally(()=>clearTimeout(t))};
 async function llm(prompt,raw){
   if(!C.key)throw new Error('Не указан ключ API (вкладка «Настройки»)');
   const rules=S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n');
   const full=raw?prompt:'ПРАВИЛА ВЛАДЕЛЬЦА (нарушать нельзя ни при каких условиях):\n'+(rules||'(нет)')+'\n\n'+prompt;
   let t;
   if(C.provider==='gemini'){
-    const r=await fetch('https://generativelanguage.googleapis.com/v1beta/models/'+C.model+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':C.key},body:JSON.stringify({contents:[{parts:[{text:full}]}]})});
+    const r=await ft('https://generativelanguage.googleapis.com/v1beta/models/'+C.model+':generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':C.key},body:JSON.stringify({contents:[{parts:[{text:full}]}]})});
     const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||'Ошибка '+r.status);
     t=j.candidates[0].content.parts.map(p=>p.text||'').join('');
   }else{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':C.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:C.model,max_tokens:8000,messages:[{role:'user',content:full}]})});
+    const r=await ft('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'content-type':'application/json','x-api-key':C.key,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({model:C.model,max_tokens:8000,messages:[{role:'user',content:full}]})});
     const j=await r.json();if(!r.ok)throw new Error(j.error&&j.error.message||'Ошибка '+r.status);
     t=j.content.map(p=>p.text||'').join('');
   }
@@ -52,15 +53,16 @@ async function llm(prompt,raw){
 // Песочница: код ИИ работает в изолированном iframe без сети, хранилища и доступа к правилам
 function runAgent(code,task,api){return new Promise((res,rej)=>{
   const f=document.createElement('iframe');f.sandbox='allow-scripts';f.style.display='none';
-  const to=setTimeout(()=>{fin();rej(new Error('Таймаут'))},180000);
-  function fin(){clearTimeout(to);removeEventListener('message',on);f.remove()}
+  let rt;const to=setTimeout(()=>{fin();rej(new Error('Общий таймаут 180 секунд'))},180000);
+  function fin(){clearTimeout(to);clearTimeout(rt);removeEventListener('message',on);f.remove()}
   function on(e){if(e.source!==f.contentWindow)return;const m=e.data||{};
-    if(m.t==='ready')f.contentWindow.postMessage({t:'run',task},'*');
+    if(m.t==='ready'){clearTimeout(rt);f.contentWindow.postMessage({t:'run',task},'*')}
     else if(m.t==='api'){
       if(!Object.prototype.hasOwnProperty.call(api,m.fn)){f.contentWindow.postMessage({t:'ret',id:m.id,e:'Запрещено'},'*');return}
       Promise.resolve().then(()=>api[m.fn](...m.args)).then(r=>f.contentWindow.postMessage({t:'ret',id:m.id,r},'*'),er=>f.contentWindow.postMessage({t:'ret',id:m.id,e:String(er.message||er)},'*'));
     }else if(m.t==='done'){fin();res(m.r)}else if(m.t==='err'){fin();rej(new Error(m.e))}}
   addEventListener('message',on);
+  rt=setTimeout(()=>{fin();rej(new Error('Песочница не запустилась (нет сигнала ready)'))},10000);
   const enc=JSON.stringify(code).replace(/</g,'\\u003c');
   f.srcdoc='<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; script-src \'unsafe-inline\' \'unsafe-eval\'"><script>'+
   'const P={};let n=0;const api=new Proxy({},{get:(_,fn)=>(...args)=>new Promise((ok,no)=>{const id=++n;P[id]={ok,no};parent.postMessage({t:"api",fn,args,id},"*")})});'+
@@ -154,11 +156,12 @@ async function restore(){const r=await fetch('https://api.github.com/repos/'+C.g
 function vSet(){
   const f=(k,ph,type)=>{const i=el('input',{type:type||'text',placeholder:ph});i.value=C[k]||'';i.onchange=()=>{C[k]=i.value.trim();save()};return i};
   const pv=el('select',null,el('option',{value:'gemini'},'Google Gemini'),el('option',{value:'claude'},'Claude (Anthropic)'));pv.value=C.provider;
-  const md=f('model','Модель');pv.onchange=()=>{C.provider=pv.value;C.model=pv.value==='gemini'?'gemini-2.5-flash':'claude-sonnet-5-5';save();render()};
+  const md=f('model','Модель');pv.onchange=()=>{C.provider=pv.value;C.model=pv.value==='gemini'?'gemini-3.6-flash':'claude-sonnet-5-5';save();render()};
   const sr=el('input',{type:'checkbox'});sr.checked=C.selfReview;sr.onchange=()=>{C.selfReview=sr.checked;save()};
-  const run=fn=>async()=>{msg='';try{await fn();msg='Готово'}catch(e){msg=String(e.message||e)}render()};
+  const run=fn=>async()=>{msg='';try{await fn();if(!msg)msg='Готово'}catch(e){msg=String(e.message||e)}render()};
   return el('div',{class:'card'},el('b',null,'«Мозг»'),pv,md,f('key','Ключ API','password'),
     el('label',{class:'mode'},sr,'Самоанализ после задач (ИИ сам предлагает улучшения)'),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:run(async()=>{msg='Проверяю…';render();const t=await llm('Ответь одним словом: ок',true);msg='Связь есть. Ответ ИИ: '+t.slice(0,80)})},'Проверить связь с ИИ')),
     el('b',null,'Резерв в GitHub'),f('ghRepo','Репозиторий: логин/имя'),f('ghToken','GitHub токен','password'),
     el('div',{class:'row'},el('button',{class:'b',onclick:run(backup)},'Сохранить копию'),el('button',{class:'b g',onclick:run(async()=>{if(!unlocked)throw new Error('Сначала откройте вкладку «Правила» и введите PIN');await restore()})},'Восстановить')),
     msg&&el('div',{class:'mu'},msg));
