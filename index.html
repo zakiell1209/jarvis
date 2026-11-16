@@ -206,6 +206,28 @@ function vSet(){
 // ===== Файлы: хранятся на телефоне (IndexedDB), кусками по 16 МБ, без лимита 200 МБ =====
 const CH=16*1024*1024,fs=n=>n>=1e9?(n/1e9).toFixed(2)+' ГБ':n>=1e6?(n/1e6).toFixed(1)+' МБ':Math.ceil(n/1e3)+' КБ';
 let fl=[],fok=false,fprog='',fview=null,fer='',fst='';
+let avUrl=ld('jv_av','https://modelviewer.dev/shared-assets/models/Astronaut.glb');
+function vAvatar(){
+  const inp=el('input',{placeholder:'Ссылка на .glb или .gltf модель'});inp.value=avUrl;
+  return [
+    el('div',{class:'card'},
+      el('b',null,'3D Аватар Джарвиса (с анимацией костей и физикой)'),
+      inp,
+      el('div',{class:'row'},el('button',{class:'b',onclick:()=>{avUrl=inp.value.trim();save();render()}},'Сохранить и загрузить'))
+    ),
+    el('div',{class:'card'},
+      el('model-viewer',{
+        src:avUrl,
+        'camera-controls':true,
+        'auto-rotate':true,
+        'animation-name':'*',
+        'autoplay':'',
+        'shadow-intensity':'1',
+        style:'width:100%;height:65vh;background:var(--bg);border-radius:10px'
+      })
+    )
+  ];
+};
 const idb=()=>new Promise((ok,no)=>{const r=indexedDB.open('jv_files',1);r.onupgradeneeded=()=>{r.result.createObjectStore('meta',{keyPath:'id'});r.result.createObjectStore('chunks')};r.onsuccess=()=>ok(r.result);r.onerror=()=>no(r.error)});
 const tx=(d,st,mode,fn)=>new Promise((ok,no)=>{const t=d.transaction(st,mode);const r=fn(t);t.oncomplete=()=>ok(r&&r.result);t.onerror=t.onabort=()=>no(t.error||new Error('Ошибка хранилища (возможно, нет места)'))});
 async function fLoad(){const d=await idb();try{fl=await tx(d,'meta','readonly',t=>t.objectStore('meta').getAll());fl.sort((a,b)=>b.ts-a.ts)}finally{d.close()}
@@ -254,8 +276,8 @@ function vFiles(){
 }
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['avatar','Аватар'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,avatar:vAvatar,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
 try{parent.postMessage('jv-ready','*')}catch(e){}
