@@ -38,11 +38,21 @@ def act(a, d):
     if a == 'ls': return {'items': sorted(os.listdir(d['path']))[:500]}
     raise ValueError('неизвестное действие: ' + a)
 
+def flush():  # сбросить случайные нажатия, накопившиеся до вопроса
+    try:
+        import msvcrt
+        while msvcrt.kbhit(): msvcrt.getwch()
+    except ImportError:
+        try:
+            import termios; termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except Exception: pass
+
 def allowed(a, d):
     if a == 'ping' or a in TRUST: return True
     with LOCK:
         print('\n>>> Jarvis просит: %s\n%s' % (a, json.dumps(d, ensure_ascii=False)[:1500]))
-        return input('Разрешить? [y/N] ').strip().lower() == 'y'
+        flush()
+        return input('Разрешить? Введите y и нажмите Enter: ').strip().lower() in ('y', 'д')
 
 class H(BaseHTTPRequestHandler):
     def _send(self, code, obj):
