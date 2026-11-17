@@ -3,18 +3,18 @@ on:
   workflow_dispatch: {}
   push:
     branches: [main]
-    paths: [index.html, shell.html, package.json, capacitor.config.json, .github/workflows/build.yml]
+    paths: [index.html, shell.html, package.json, capacitor.config.json, native/**, .github/workflows/build.yml]
 permissions:
   contents: write
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 20
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: 17
@@ -26,6 +26,16 @@ jobs:
           cp index.html www/app.html
           git hash-object index.html > www/app.sha
       - run: npx cap add android
+      - name: Нативные возможности (файлы телефона, сеть, shell)
+        run: |
+          test -f native/JarvisNative.java || { echo "::error::Нет файла native/JarvisNative.java"; exit 1; }
+          test -f native/MainActivity.java || { echo "::error::Нет файла native/MainActivity.java"; exit 1; }
+          cp native/*.java android/app/src/main/java/com/jarvis/agent/
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i 's#<application#<application android:requestLegacyExternalStorage="true"#' $M
+          sed -i 's#</manifest>#    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />\n    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />\n</manifest>#' $M
+          grep -q MANAGE_EXTERNAL_STORAGE $M || { echo "::error::Не удалось добавить разрешения в манифест"; exit 1; }
+          cat $M
       - run: npx cap sync android
       - name: Версия и подпись
         env:
