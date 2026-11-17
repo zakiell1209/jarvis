@@ -132,7 +132,7 @@ async function runTask(text,auto){
   ans=await runAgent(curCode(),text,mkApi(id,auto));stopHit(ans);
   if(C.selfReview&&!auto){status('Самоанализ…');try{const r=JSON.parse(clean(await llm('Задание: '+text+'\nТвой ответ: '+ans+'\nСтоит ли предложить владельцу улучшение твоего кода? Ответь JSON: {"suggest":true/false,"goal":"что улучшить"}')));if(r.suggest&&r.goal)await improve(String(r.goal),false,id)}catch(e){}}
 }
-async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e);autoFix(t.slice(0,120),{kind:'task',task:t},err).then(fx=>{if(fx){err='';notify('Джарвис исправил себя: '+fx.title)}}).catch(()=>{})}busy='';save();render()}
+async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Ищу сейвы и папки HornyCraft…';err='';ans='';render();try{const res=await agentLoop('Найди на телефоне все папки и файлы, связанные с игрой Hornicraft / HornyCraft / Horny Craft. Покажи полный путь к папкам, где лежат сейвы и persistent-данные. Ничего не меняй, только найди и выведи пути.');ans=res;txt='';}catch(e){err=String(e.message||e)}busy='';save();render()}
 async function approve(e){
   if(e.kind==='native'){busy='Публикую…';render();try{await publishNative(e);e.status='published';save();ans='Правка отправлена, собирается новый APK. Вам придёт уведомление.'}catch(x){err=String(x.message||x)}busy='';save();render();return}
   if(e.kind==='app'){busy='Публикую…';render();try{await publishApp(e);e.status='published';save();parent.postMessage('jv-check','*')}catch(x){err=String(x.message||x)}busy='';save();render();return}
