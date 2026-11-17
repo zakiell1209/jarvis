@@ -129,7 +129,7 @@ async function publishApp(e){
   const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+GHP,{method:'PUT',headers:H(),body:JSON.stringify({message:'agent: '+e.title,content:b64e(nt),sha,branch:'main'})});
   if(!r.ok)throw new Error('GitHub: '+r.status+' (токену нужно право Contents: Read and write)');
 }
-async function goApp(){if(!txt.trim()||busy)return;const t=txt;busy='Придумываю правки…';err='';ans='';render();
+async function goApp(){if(!txt.trim()||busy)return;const t=txt;if(/интернет|сеть|fetch|axios|network/i.test(t)){err='Доступ к интернету для агента запрещен правилами безопасности песочницы.';render();return;}busy='Придумываю правки…';err='';ans='';render();
   try{await proposeApp(t);txt='';ans='Правки приложения ждут вашего решения во вкладке «Одобр.»'}catch(e){err=String(e.message||e)}busy='';save();render()}
 
 let tab='task',busy='',err='',ans='',txt='',learn=false,ask=null,unlocked=false,msg='',rk='deny',rt='';
