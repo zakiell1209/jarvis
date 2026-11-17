@@ -77,7 +77,7 @@ async function setBg(path){
   if(!c||!c.convertFileSrc)throw new Error('Фон доступен только в APK новой версии');
   const url=c.convertFileSrc(path);
   document.body.style.backgroundImage='url("'+url+'")';
-  try{localStorage.setItem('jv_bg',JSON.stringify({path}))}catch(e){}
+  try{localStorage.setItem('jv_bg',JSON.stringify({path}));localStorage.removeItem('jv_bgdata')}catch(e){}
   return 'Фон установлен: '+path}
 
 // Улучшение кода: проверка работоспособности → применение (сразу, если поручение ваше) или в «Одобрения»
@@ -132,8 +132,9 @@ async function runTask(text,auto){
   ans=await runAgent(curCode(),text,mkApi(id,auto));stopHit(ans);
   if(C.selfReview&&!auto){status('Самоанализ…');try{const r=JSON.parse(clean(await llm('Задание: '+text+'\nТвой ответ: '+ans+'\nСтоит ли предложить владельцу улучшение твоего кода? Ответь JSON: {"suggest":true/false,"goal":"что улучшить"}')));if(r.suggest&&r.goal)await improve(String(r.goal),false,id)}catch(e){}}
 }
-async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e)}busy='';save();render()}
+async function go(){if(!txt.trim()||busy)return;const t=txt;busy='Работаю…';err='';ans='';render();try{await runTask(t,learn);txt=''}catch(e){err=String(e.message||e);autoFix(t.slice(0,120),{kind:'task',task:t},err).then(fx=>{if(fx){err='';notify('Джарвис исправил себя: '+fx.title)}}).catch(()=>{})}busy='';save();render()}
 async function approve(e){
+  if(e.kind==='native'){busy='Публикую…';render();try{await publishNative(e);e.status='published';save();ans='Правка отправлена, собирается новый APK. Вам придёт уведомление.'}catch(x){err=String(x.message||x)}busy='';save();render();return}
   if(e.kind==='app'){busy='Публикую…';render();try{await publishApp(e);e.status='published';save();parent.postMessage('jv-check','*')}catch(x){err=String(x.message||x)}busy='';save();render();return}
   if(e.kind==='mem'){e.status='active';save();render();return}
   S.log=S.log.filter(x=>x.id!==e.id);busy='Применяю…';render();
@@ -158,80 +159,8 @@ function vTask(){
 function vOk(){
   const p=S.log.filter(e=>e.status==='pending');
   if(!p.length)return el('div',{class:'card mu'},'Предложений нет. Всё, что я захочу изменить сам, появится здесь и не сработает без вашего «Одобрить».');
-  return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':e.kind==='app'?'Правка приложения':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:e.kind==='app'?(e.risk?'⚠ Затрагивает защитные функции!\n\n':'')+JSON.parse(e.body).map(x=>'− '+x.old.slice(0,200)+'\n+ '+x.new.slice(0,400)).join('\n\n'):'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
+  return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':e.kind==='app'?'Правка приложения':e.kind==='native'?'Правка нативного кода (APK)':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:(e.kind==='app'||e.kind==='native')?(e.risk?'⚠ Затрагивает защитные функции!\n\n':'')+JSON.parse(e.body).map(x=>'− '+x.old.slice(0,200)+'\n+ '+x.new.slice(0,400)).join('\n\n'):'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
     el('div',{class:'row'},el('button',{class:'b ok',disabled:!!busy,onclick:()=>approve(e)},busy||'Одобрить'),el('button',{class:'b rd',onclick:()=>{S.log=S.log.filter(x=>x.id!==e.id);save();render()}},'Отклонить'))))];
-}
-let modApp=''; let modGoal=''; let modBusy=''; let modProgress=0; let modPkg='';
-let allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
-let galleryItems = [];
-async function loadGallery(){
-  try{
-    const res = await nat('galleryList',{});
-    galleryItems = res.items || [];
-  }catch(e){ galleryItems = []; }
-  render();
-}
-async function loadPhoneApps(){
-  allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
-  modPkg = 'com.hornicraft.app';
-  render();
-}
-async function runModTask(){
-  if(!modGoal.trim()||!modPkg)return;
-  modBusy='Сканирование и распаковка…'; modProgress=10;
-  render();
-  try{
-    modProgress=35; modBusy='Анализ файлов приложения '+modPkg+'…'; render();
-    try{ await nat('appInspect',{packageName: modPkg}); }catch(ex){}
-    modProgress=60; modBusy='Применение изменений…'; render();
-    const res = await agentLoop('Получи полный доступ ко всем файлам телефона через FS и модифицируй приложение ' + modPkg + ' по заданию: ' + modGoal + '. Используй app_modify, app_inspect и инструменты файловой системы.');
-    modProgress=100; modBusy='';
-    ans = 'Результат моддинга:\n' + res;
-    alert('Моддинг завершен. Проверьте результат в задаче.');
-  }catch(e){
-    alert('Ошибка моддинга: ' + e.message);
-  }
-  modBusy=''; modProgress=0; render();
-}
-let galTab = 'mod';
-function vGallery(){
-  if(!galleryItems.length) loadGallery();
-  return [
-    el('div',{class:'card'},
-      el('b',null,'Галерея телефона'),
-      el('div',{class:'mu'},'Просмотр фотографий, хранящихся на устройстве.'),
-      el('div',{class:'row'},el('button',{class:'b',onclick:loadGallery},'Обновить галерею')),
-      el('div',{class:'row',style:'margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;'},...
-        galleryItems.map(item => el('div',{class:'card',style:'width:100px;text-align:center;padding:4px;cursor:pointer;',onclick:async()=>{
-          try{
-            const imgData = await nat('galleryGet',{id:item.id});
-            fview = { m: { name: item.name || 'Фото', size: item.size || 0 }, kind: 'img', url: 'data:image/jpeg;base64,' + imgData.data };
-            render();
-          }catch(e){alert('Ошибка загрузки фото: '+e.message);}
-        }},
-          el('div',{style:'width:100px;height:100px;background:#333;background-image:url("data:image/jpeg;base64,'+item.thumbnail+'");background-size:cover;background-position:center;border-radius:6px;'}),
-          el('div',{class:'mu',style:'font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;'},item.name || 'Фото')
-        ))
-      )
-    )
-  ];
-}
-function vMod(){
-  if(!allPhoneApps.length) loadPhoneApps();
-  const ta = el('input',{placeholder:'Что изменить в выбранном приложении'}); ta.value=modGoal; ta.oninput=()=>modGoal=ta.value;
-  return [
-    el('div',{class:'card'},
-      el('b',null,'Моддинг приложений телефона'),
-      el('div',{class:'mu'},'Выберите приложение, опишите желаемые изменения и запустите процесс. Джарвис получит доступ ко всем файлам и изменит приложение.'),
-      ta,
-      el('div',{class:'card',style:'border-color:var(--ac);background:var(--bd);margin:8px 0'}, 
-        el('b',null,'Целевое приложение: Хорикрафт'),
-        el('div',{class:'mu',style:'font-size:11px'},'com.hornicraft.app')
-      ),
-      modProgress>0?el('div',{class:'card'},el('div',{class:'mu'},modBusy),el('div',{style:'background:var(--bd);border-radius:6px;height:12px;margin-top:6px;overflow:hidden'},el('div',{style:'background:var(--ac);width:'+modProgress+'%;height:100%;transition:width 0.3s'}))):null,
-      el('div',{class:'row',style:'margin-top:10px'},el('button',{class:'b',disabled:!!modBusy,onclick:runModTask},modBusy||'Выполнить моддинг'))
-    )
-  ];
 }
 function vHist(){
   const out=[el('div',{class:'mu'},'Откат задачи удаляет её изменения и все более поздние (они могли на них опираться).')];
@@ -361,8 +290,6 @@ const shellRun=async c=>{await pinGate('команда: '+c.slice(0,80));return 
 const clip=(x,n)=>{const s=typeof x==='string'?x:JSON.stringify(x);return s.length>n?s.slice(0,n)+'…[обрезано, всего '+s.length+' симв.]':s};
 const strip=s=>s.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
 const TOOLS={
-  gallery_list:['{} — получить список фотографий и альбомов из галереи',()=>nat('galleryList',{})],
-  gallery_get:['{id} — получить картинку по ID',a=>nat('galleryGet',{id:a.id})],
   apps_list:['{} — список установленных приложений и игр',()=>nat('appsList',{})],
   app_launch:['{packageName} — запуск приложения или игры по пакету',a=>nat('appLaunch',{packageName:a.packageName})],
   fs_list:['{path} — содержимое папки',a=>FS.list(a.path)],
@@ -372,7 +299,7 @@ const TOOLS={
   screen_draw:['{action: "start"|"add"|"clear", points?: [{x,y}]} — рисовать поверх экрана',a=>nat('screenDraw',{action:a.action,points:a.points||[]})],
   screen_capture:['{} — сделать скриншот экрана (вернет base64 изображения)',()=>nat('screenCapture',{})],
   app_inspect:['{packageName} — файлы и манифест приложения',a=>nat('appInspect',{packageName:a.packageName})],
-  app_modify:['{packageName, path, text} — изменение файлов приложения',a=>nat('appModify',{packageName:a.packageName,path:a.path,text:a.text})],
+  app_modify:['{packageName, path, text} — изменение файлов приложения (с сохранением копии)',async a=>{const r=await nat('appModify',{packageName:a.packageName,path:a.path,text:a.text});jvAppWrites++;return r}],
   net_scan:['{} — сканирование доступных сетей и прокси',()=>nat('netScan',{ })],
   fs_stat:['{path} — есть ли файл, размер, дата',a=>FS.stat(a.path)],
   fs_read:['{path, offset?, maxBytes?} — прочитать текст файла (по умолчанию 200000 байт; большие читай кусками через offset)',a=>FS.read(a.path,a.offset,a.maxBytes)],
@@ -384,7 +311,8 @@ const TOOLS={
   fs_move:['{from, to} — переместить или переименовать',a=>FS.move(a.from,a.to)],
   fs_delete:['{path} — удалить (уходит в корзину, можно вернуть)',a=>FS.remove(a.path)],
   set_background:['{path} — поставить картинку из памяти телефона фоном приложения',a=>setBg(a.path)],
-  self_edit:['{goal} — предложить улучшение самого приложения; владелец одобрит его во вкладке «Одобр.»',a=>proposeApp(String(a.goal)).then(e=>'Предложение создано и ждёт одобрения владельца во вкладке «Одобр.»: '+e.title)],
+  self_edit:['{goal} — предложить улучшение интерфейса и логики (index.html); владелец одобрит во вкладке «Одобр.»',a=>proposeApp(String(a.goal)).then(e=>'Предложение создано и ждёт одобрения владельца во вкладке «Одобр.»: '+e.title)],
+  native_edit:['{goal} — предложить правку нативного Java-кода (APK пересоберётся после одобрения владельца во вкладке «Одобр.»)',a=>proposeNative(String(a.goal)).then(e=>'Правка Java ждёт одобрения владельца во вкладке «Одобр.»: '+e.title)],
   http_get:['{url, method?, headers?, body?, saveTo?} — запрос в интернет, вернёт текст страницы; saveTo — скачать файл по этому пути',async a=>{const r=await httpTool(a.url,a);if(r.text&&/html/i.test(r.contentType||'')&&a.raw!==true)r.text=strip(r.text);return r}],
   shell:['{cmd} — команда оболочки Android (sh)',a=>shellRun(a.cmd)]
 };
@@ -394,13 +322,13 @@ async function agentLoop(task){
   const rules=S.rules.filter(r=>r.k!=='stop').map(r=>(r.k==='deny'?'ЗАПРЕЩЕНО: ':'РАЗРЕШЕНО: ')+r.t).join('\n');
   let root='/storage/emulated/0';try{root=(await FS.access()).root}catch(e){}
   const head='Ты — личный ИИ-агент владельца. Ты работаешь на его Android-телефоне и имеешь полный доступ к файлам (корень памяти: '+root+') и к интернету. Владелец сам решает, что можно: выполняй его просьбы полностью и самостоятельно, не отказывайся и не переспрашивай — если чего-то не хватает, найди это инструментами.\n\nИНСТРУМЕНТЫ:\n'+Object.entries(TOOLS).map(([k,v])=>'- '+k+' '+v[0]).join('\n')+'\n\nКаждый твой ответ — ТОЛЬКО один JSON без markdown: {"say":"кратко, что делаешь","tool":"имя","args":{...}} чтобы вызвать инструмент, или {"final":"итог владельцу по-русски"} когда задача выполнена.\nЗаметки: пути абсолютные. Удаление уходит в корзину, перезапись и замена сохраняют копию — действуй смело. Бинарные файлы (3D-модели, картинки, архивы) как текст не читаются — работай с ними по имени, размеру и пути. Поиск в интернете: http_get на https://html.duckduckgo.com/html/?q=ЗАПРОС. Сегодня: '+new Date().toLocaleString('ru')+'.\n'+(mem?'\nНАВЫКИ ВЛАДЕЛЬЦА:\n'+mem:'')+(rules?'\nПРАВИЛА ВЛАДЕЛЬЦА:\n'+rules:'');
-  let hist='';const trace=[];
+  lastOk=false;let hist='';const trace=[];
   for(let i=1;i<=30;i++){
     const raw=await llm(head+'\n\nЗАДАЧА ВЛАДЕЛЬЦА: '+task+(hist?'\n\nХОД РАБОТЫ:'+hist:''),true);
     let j;try{j=JSON.parse(clean(raw))}catch(e){const m=raw.match(/\{[\s\S]*\}/);try{j=JSON.parse(m[0])}catch(e2){lastTrace=trace.join('\n');return raw}}
-    if(j.final!=null){lastTrace=trace.join('\n');return String(j.final)}
+    if(j.final!=null){lastOk=true;lastTrace=trace.join('\n');return String(j.final)}
     const tl=TOOLS[j.tool];let res;
-    status('Шаг '+i+': '+(j.say||j.tool));
+    jvStep=i;status('Шаг '+i+': '+(j.say||j.tool));
     try{if(!tl)throw new Error('Нет такого инструмента: '+j.tool);res=clip(await tl[1](j.args||{}),6000)}catch(e){res='ОШИБКА: '+(e.message||e)}
     trace.push(i+'. '+(j.say||'')+' → '+j.tool+' '+clip(j.args||{},140)+'\n   '+clip(res,200));
     hist+='\n[Шаг '+i+'] '+(j.say||'')+' → '+j.tool+' '+JSON.stringify(j.args||{})+'\nРезультат: '+res+'\n';
@@ -411,7 +339,7 @@ async function agentLoop(task){
 
 // ===== Вкладка «Файлы»: проводник по памяти телефона =====
 let pfp='',pfe=[],pff=null,pfq='',pfr=null,pfer='',pfload=false,pfacc=null,pfmode='phone',pfbusy='';
-async function pfInit(){pfer='';try{pfacc=await FS.access();if(!pfacc.granted){try{await FS.requestAccess()}catch(ex){}}pfacc=await FS.access();if(pfacc.granted){await pfLs(pfp||pfacc.root);return}}catch(e){pfer=String(e.message||e)}render()}
+async function pfInit(){pfer='';try{pfacc=await FS.access();if(pfacc.granted){await pfLs(pfp||pfacc.root);return}}catch(e){pfer=String(e.message||e)}render()}
 async function pfLs(p){pfer='';pff=null;pfr=null;try{const r=await FS.list(p);pfp=r.path;pfe=r.entries;if(r.total>r.entries.length)pfer='Показано '+r.entries.length+' из '+r.total}catch(e){pfer=String(e.message||e)}render()}
 const pfUp=()=>{const i=pfp.replace(/\/+$/,'').lastIndexOf('/');return i>0?pfp.slice(0,i):'/'};
 const pfClose=()=>{if(pff&&pff.url)URL.revokeObjectURL(pff.url);pff=null;render()};
@@ -476,11 +404,151 @@ function vFiles(){
   else out.push(...pfe.slice(0,300).map(row));
   return out;
 }
+// ===== Вкладка «Приложения»: изменение файлов выбранного приложения с прогрессом и уведомлением =====
+let apTab={pkg:'',label:'',task:'',busy:false,pct:0,msg:'',err:'',apps:null,loading:false};
+let jvStep=0,jvAppWrites=0;
+function toast(t){const d=el('div',{style:'position:fixed;left:12px;right:12px;bottom:80px;z-index:200;background:var(--ok);color:#fff;padding:14px;border-radius:12px;text-align:center'},t);document.body.append(d);setTimeout(()=>d.remove(),7000)}
+function notify(t){toast(t);try{if('Notification' in window&&Notification.permission==='granted')new Notification('Джарвис',{body:t})}catch(e){}}
+async function loadApps(){
+  try{const r=await nat('appsList',{});apTab.apps=(r.apps||[]).filter(a=>!a.system).sort((a,b)=>String(a.label).localeCompare(String(b.label),'ru'));apTab.err=''}
+  catch(e){apTab.apps=[];apTab.err=String(e.message||e)}
+  apTab.loading=false;render()}
+async function runAppTask(){
+  if(apTab.busy)return;
+  if(!apTab.pkg){apTab.err='Сначала выберите приложение';render();return}
+  if(!apTab.task.trim()){apTab.err='Напишите, что нужно изменить';render();return}
+  apTab.busy=true;apTab.pct=3;apTab.err='';apTab.msg='';jvStep=0;const before=jvAppWrites;render();
+  const timer=setInterval(()=>{apTab.pct=Math.min(90,Math.max(apTab.pct,jvStep*6+3));render()},700);
+  try{
+    const ans=await agentLoop('Измени файлы приложения «'+apTab.label+'» (пакет '+apTab.pkg+'). Сначала посмотри его файлы инструментом app_inspect с packageName="'+apTab.pkg+'", затем внеси изменения инструментом app_modify с packageName="'+apTab.pkg+'". Задача владельца: '+apTab.task);
+    if(jvAppWrites>before){apTab.pct=100;apTab.msg=ans;notify('Изменения внесены и сохранены: '+apTab.label)}
+    else{apTab.err='Изменения не внесены. Ответ агента: '+String(ans).slice(0,400)}
+  }catch(e){apTab.err=String(e.message||e)}
+  clearInterval(timer);
+  if(!apTab.msg){
+    const fx=await autoFix(apTab.task.slice(0,120),{kind:'app',pkg:apTab.pkg,label:apTab.label,task:apTab.task},apTab.err||'Агент не внёс изменений').catch(e=>{apTab.err=String(e.message||e);return null});
+    if(fx){apTab.err='';apTab.msg='Агент исправил себя ('+fx.title+')'+(C.autoApply?'. Применяю обновление, задача повторится.':'. Правка ждёт одобрения во вкладке «Одобр.»')}
+  }
+  apTab.busy=false;render()}
+function vApps(){
+  if(apTab.apps===null&&!apTab.loading){apTab.loading=true;loadApps()}
+  const list=apTab.apps||[];
+  const sel=el('select',{onchange:e=>{apTab.pkg=e.target.value;const o=list.find(a=>a.packageName===apTab.pkg);apTab.label=o?o.label:apTab.pkg;render()}},
+    el('option',{value:''},apTab.loading?'Загружаю список…':'— выберите приложение —'),
+    list.map(a=>el('option',{value:a.packageName,selected:a.packageName===apTab.pkg},a.label+' ('+a.packageName+')')));
+  const manual=el('input',{placeholder:'или введите пакет вручную, например com.example.game',value:apTab.pkg,oninput:e=>{apTab.pkg=e.target.value.trim();apTab.label=apTab.pkg}});
+  const task=el('input',{placeholder:'Что изменить, например: поменять текстуры на тёмные',value:apTab.task,oninput:e=>{apTab.task=e.target.value}});
+  const bar=(apTab.busy||apTab.pct>0)?el('div',{style:'height:12px;background:var(--bd);border-radius:99px;overflow:hidden;margin:8px 0'},el('div',{style:'height:100%;width:'+apTab.pct+'%;background:var(--ac);transition:width .5s'})):null;
+  return [
+    el('div',{class:'card'},el('b',null,'Фон приложения'),el('div',{class:'row'},el('button',{class:'b g',onclick:pickBg},'Выбрать фото из галереи'))),
+    el('div',{class:'card'},
+      el('b',null,'1. Приложение'),sel,manual,
+      apTab.err&&!apTab.apps?el('div',{class:'mu'},'Список приложений недоступен: '+apTab.err+'. Введите пакет вручную или обновите APK.'):null),
+    el('div',{class:'card'},
+      el('b',null,'2. Что изменить'),task,
+      el('div',{class:'row'},el('button',{class:'b',disabled:apTab.busy,onclick:runAppTask},apTab.busy?'Выполняю…':'Выполнить'))),
+    bar?el('div',{class:'card'},el('div',{class:'mu'},apTab.busy?'Выполняется: '+apTab.pct+'%':'Готово'),bar):null,
+    apTab.err&&apTab.apps?el('div',{class:'card er'},apTab.err):null,
+    apTab.msg&&!apTab.busy?el('div',{class:'card'},el('div',{class:'ans'},apTab.msg)):null
+  ]}
+
+// ===== Самоисправление: задача не выполнена → агент сам дорабатывает приложение → публикует → повторяет задачу =====
+let lastOk=false;
+const SAFE_RE=/pinGate|askPin|C\.pin|C\.autoApply|C\.ghToken|ghToken|jv_c|jv_af|jv_retry|parent\.postMessage\('jv-ready'/;
+function afState(){return ld('jv_af',{attempts:{},pubs:[]})}
+function afSave(s){try{localStorage.setItem('jv_af',JSON.stringify(s))}catch(e){}}
+// key — задача, retry — что повторить после обновления, failure — почему не получилось.
+// Лимиты: 3 попытки на одну задачу и не больше 6 публикаций в час.
+// Защитные функции (PIN, одобрение, переключатели) правка менять не может.
+async function autoFix(key,retry,failure){
+  const st=afState();const now=Date.now();
+  st.pubs=st.pubs.filter(x=>x>now-3600000);
+  st.attempts[key]=(st.attempts[key]||0)+1;
+  if(st.attempts[key]>3||st.pubs.length>=6){afSave(st);return null}
+  afSave(st);
+  const en=await proposeApp('Задача владельца не выполнена: '+key+'\nПричина: '+String(failure).slice(0,1500)+'\nДоработай приложение так, чтобы задача выполнялась: добавь недостающий инструмент или исправь разбор ответа и обработку ошибок. Недостающие сведения агент может получить через http_get (поиск: https://html.duckduckgo.com/html/?q=ЗАПРОС).');
+  if(SAFE_RE.test(en.body)){en.status='rejected';save();throw new Error('Правка затрагивает защитные функции, отклонена')}
+  if(!C.autoApply)return en;
+  await publishApp(en);en.status='published';en.source='auto';save();
+  st.pubs.push(now);afSave(st);
+  const rs=ld('jv_retry',[]);rs.push(retry);try{localStorage.setItem('jv_retry',JSON.stringify(rs))}catch(e){}
+  notify('Джарвис исправил себя: '+en.title+'. Применяю обновление и повторю задачу.');
+  try{parent.postMessage('jv-check','*')}catch(e){}
+  return en}
+// После обновления повторяем задачу, которая не выполнилась
+async function resumeRetries(){
+  const rs=ld('jv_retry',[]);if(!rs.length)return;
+  const [first,...rest]=rs;
+  try{localStorage.setItem('jv_retry',JSON.stringify(rest))}catch(e){}
+  if(first.kind==='app'){apTab.pkg=first.pkg;apTab.label=first.label;apTab.task=first.task;tab='apps';render();await runAppTask()}
+  else{txt=first.task;tab='task';render();await go()}}
+
+// ===== Нативная часть: агент предлагает правку Java → одобрение владельца → коммит → сборка APK → уведомление =====
+const NATIVE_PATH='native/JarvisNative.java';
+// Эти фрагменты защиты нельзя удалить: правка, которая их убирает, отклоняется
+const GUARD_TOKENS=['gate(','killed(','APPROVED','"KILL"','need()'];
+async function ghGetPath(path){const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+path+'?ref=main',{headers:H(),cache:'no-store'});if(!r.ok)throw new Error('GitHub: '+r.status);const j=await r.json();return{sha:j.sha,text:b64d(j.content)}}
+async function proposeNative(goal){
+  const {sha,text}=await ghGetPath(NATIVE_PATH);
+  const raw=await llm('Ты разработчик нативной части Android-приложения «Джарвис» (Java, Capacitor-плагин). Вот файл '+NATIVE_PATH+':\n'+text+'\n\nЗадача: '+goal+'\nВерни ТОЛЬКО JSON без markdown: {"title":"кратко, что меняется","edits":[{"old":"точный фрагмент, встречающийся ровно один раз","new":"чем заменить"}]}. Не убирай проверки доступа (gate, killed, APPROVED, KILL).',true);
+  const p=parseLoose(raw);
+  if(!Array.isArray(p.edits)||!p.edits.length||p.edits.length>20)throw new Error('ИИ не предложил правок');
+  for(const tok of GUARD_TOKENS){
+    const inOld=p.edits.some(e=>String(e.old).includes(tok)), inNew=p.edits.some(e=>String(e.new).includes(tok));
+    if(inOld&&!inNew)throw new Error('Правка убирает защиту «'+tok+'», отклонена');
+  }
+  applyEdits(text,p.edits);
+  const en={id:uid(),kind:'native',title:String(p.title||goal).slice(0,80),body:JSON.stringify(p.edits),baseSha:sha,source:'self',status:'pending',ts:Date.now()};
+  S.log.push(en);save();return en}
+// Коммит в native/ сам запускает сборку APK (см. build.yml), поэтому здесь только ждём результата
+async function publishNative(e){
+  const start=Date.now();
+  const {sha,text}=await ghGetPath(NATIVE_PATH);const nt=applyEdits(text,JSON.parse(e.body));
+  const r=await fetch('https://api.github.com/repos/'+REPO()+'/contents/'+NATIVE_PATH,{method:'PUT',headers:H(),body:JSON.stringify({message:'agent native: '+e.title,content:b64e(nt),sha,branch:'main'})});
+  if(!r.ok)throw new Error('GitHub: '+r.status+' (токену нужно право Contents: Read and write)');
+  pollBuild(start)}
+async function pollBuild(start){
+  for(let i=0;i<60;i++){
+    await new Promise(r=>setTimeout(r,20000));
+    try{
+      const r=await fetch('https://api.github.com/repos/'+REPO()+'/actions/workflows/build.yml/runs?branch=main&per_page=1',{headers:H(),cache:'no-store'});
+      const j=await r.json();const run=j.workflow_runs&&j.workflow_runs[0];
+      if(!run||new Date(run.created_at).getTime()<start-60000||run.status!=='completed')continue;
+      if(run.conclusion==='success'){
+        const rel=await fetch('https://api.github.com/repos/'+REPO()+'/releases/latest',{headers:H()}).then(x=>x.json());
+        const apk=(rel.assets||[]).find(a=>/\.apk$/.test(a.name));
+        const url=apk?apk.browser_download_url:rel.html_url;
+        notify('Новый APK готов к установке');
+        const d=el('a',{href:url,target:'_blank',style:'position:fixed;left:12px;right:12px;bottom:130px;z-index:201;background:var(--ac);color:#fff;padding:14px;border-radius:12px;text-align:center'},'Установить новый APK');
+        document.body.append(d);
+      }else notify('Сборка APK не удалась: '+run.conclusion);
+      return}catch(e){}
+  }}
+
+// Фон из галереи: системный выбор фото, разрешение на все файлы не нужно
+function pickBg(){
+  const inp=el('input',{type:'file',accept:'image/*'});
+  inp.style.display='none';document.body.append(inp);
+  inp.onchange=()=>{
+    const f=inp.files&&inp.files[0];inp.remove();if(!f)return;
+    const img=new Image();
+    img.onload=()=>{
+      const k=Math.min(1,1600/Math.max(img.width,img.height));
+      const c=document.createElement('canvas');c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+      c.getContext('2d').drawImage(img,0,0,c.width,c.height);
+      const d='data:image/jpeg;base64,'+c.toDataURL('image/jpeg',0.85).split(',')[1];
+      document.body.style.backgroundImage='url("'+d+'")';
+      try{localStorage.setItem('jv_bgdata',d);localStorage.removeItem('jv_bg');toast('Фон установлен')}
+      catch(e){toast('Фото слишком большое для сохранения, выберите меньше')}
+    };
+    img.src=URL.createObjectURL(f)};
+  inp.click()}
+
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['mod','Моддинг'],['gallery','Галерея'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,mod:vMod,gallery:vGallery,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['apps','Приложения'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,apps:vApps,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
-try{document.body.style.backgroundImage='url("https://i.imgur.com/8Q9W46v.jpeg")';document.body.style.backgroundSize='cover';document.body.style.backgroundPosition='center';}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
+try{const sb=ld('jv_bg',null);const bd=localStorage.getItem('jv_bgdata');if(bd)document.body.style.backgroundImage='url("'+bd+'")';else if(sb&&sb.path)setBg(sb.path).catch(()=>{});else nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}setTimeout(()=>{resumeRetries().catch(()=>{})},2500);try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
