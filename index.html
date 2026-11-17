@@ -275,6 +275,10 @@ const clip=(x,n)=>{const s=typeof x==='string'?x:JSON.stringify(x);return s.leng
 const strip=s=>s.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
 const TOOLS={
   fs_list:['{path} — содержимое папки',a=>FS.list(a.path)],
+  apps_list:['{} — список установленных приложений',()=>nat('appsList',{ })],
+  app_inspect:['{packageName} — файлы и манифест приложения',a=>nat('appInspect',{packageName:a.packageName})],
+  app_modify:['{packageName, path, text} — изменение файлов приложения',a=>nat('appModify',{packageName:a.packageName,path:a.path,text:a.text})],
+  net_scan:['{} — сканирование доступных сетей и прокси',()=>nat('netScan',{ })],
   fs_stat:['{path} — есть ли файл, размер, дата',a=>FS.stat(a.path)],
   fs_read:['{path, offset?, maxBytes?} — прочитать текст файла (по умолчанию 200000 байт; большие читай кусками через offset)',a=>FS.read(a.path,a.offset,a.maxBytes)],
   fs_search:['{root?, name?, content?, maxResults?} — найти файлы по части имени и/или по тексту внутри (рекурсивно)',a=>FS.search({root:a.root,name:a.name,content:a.content,maxResults:a.maxResults||50})],
