@@ -163,6 +163,14 @@ function vOk(){
 }
 let modApp=''; let modGoal=''; let modBusy=''; let modProgress=0; let modPkg='';
 let allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
+let galleryItems = [];
+async function loadGallery(){
+  try{
+    const res = await nat('galleryList',{});
+    galleryItems = res.items || [];
+  }catch(e){ galleryItems = []; }
+  render();
+}
 async function loadPhoneApps(){
   allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
   modPkg = 'com.hornicraft.app';
@@ -184,6 +192,29 @@ async function runModTask(){
     alert('Ошибка моддинга: ' + e.message);
   }
   modBusy=''; modProgress=0; render();
+}
+let galTab = 'mod';
+function vGallery(){
+  if(!galleryItems.length) loadGallery();
+  return [
+    el('div',{class:'card'},
+      el('b',null,'Галерея телефона'),
+      el('div',{class:'mu'},'Просмотр фотографий, хранящихся на устройстве.'),
+      el('div',{class:'row'},el('button',{class:'b',onclick:loadGallery},'Обновить галерею')),
+      el('div',{class:'row',style:'margin-top:10px;display:flex;flex-wrap:wrap;gap:8px;'},...
+        galleryItems.map(item => el('div',{class:'card',style:'width:100px;text-align:center;padding:4px;cursor:pointer;',onclick:async()=>{
+          try{
+            const imgData = await nat('galleryGet',{id:item.id});
+            fview = { m: { name: item.name || 'Фото', size: item.size || 0 }, kind: 'img', url: 'data:image/jpeg;base64,' + imgData.data };
+            render();
+          }catch(e){alert('Ошибка загрузки фото: '+e.message);}
+        }},
+          el('div',{style:'width:100px;height:100px;background:#333;background-image:url("data:image/jpeg;base64,'+item.thumbnail+'");background-size:cover;background-position:center;border-radius:6px;'}),
+          el('div',{class:'mu',style:'font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;'},item.name || 'Фото')
+        ))
+      )
+    )
+  ];
 }
 function vMod(){
   if(!allPhoneApps.length) loadPhoneApps();
@@ -330,6 +361,8 @@ const shellRun=async c=>{await pinGate('команда: '+c.slice(0,80));return 
 const clip=(x,n)=>{const s=typeof x==='string'?x:JSON.stringify(x);return s.length>n?s.slice(0,n)+'…[обрезано, всего '+s.length+' симв.]':s};
 const strip=s=>s.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
 const TOOLS={
+  gallery_list:['{} — получить список фотографий и альбомов из галереи',()=>nat('galleryList',{})],
+  gallery_get:['{id} — получить картинку по ID',a=>nat('galleryGet',{id:a.id})],
   apps_list:['{} — список установленных приложений и игр',()=>nat('appsList',{})],
   app_launch:['{packageName} — запуск приложения или игры по пакету',a=>nat('appLaunch',{packageName:a.packageName})],
   fs_list:['{path} — содержимое папки',a=>FS.list(a.path)],
@@ -445,8 +478,8 @@ function vFiles(){
 }
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['mod','Моддинг'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,mod:vMod,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['mod','Моддинг'],['gallery','Галерея'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,mod:vMod,gallery:vGallery,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
 try{document.body.style.backgroundImage='url("https://i.imgur.com/8Q9W46v.jpeg")';document.body.style.backgroundSize='cover';document.body.style.backgroundPosition='center';}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
