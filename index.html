@@ -272,6 +272,7 @@ const FS={
   access:()=>nat('access'),requestAccess:()=>nat('requestAccess'),
   list:p=>nat('list',{path:p}),stat:p=>nat('stat',{path:p}),
   read:(p,offset,maxBytes)=>nat('readText',{path:p,offset:offset||0,maxBytes:maxBytes||200000}),
+  readBase64:(p,offset,length)=>nat('readBase64',{path:p,offset:offset||0,length:length||2000000}),
   search:o=>nat('search',o),mkdir:p=>nat('mkdir',{path:p}),
   write:async(p,text,append)=>{if(!append&&await exists(p))await pinGate('перезапись файла '+p);return nat('writeText',{path:p,text:String(text),append:!!append})},
   replace:(p,find,rep,all)=>nat('replaceInFile',{path:p,find:String(find),replace:String(rep),all:all!==false}),
