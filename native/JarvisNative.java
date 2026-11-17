@@ -1,6 +1,9 @@
 package com.jarvis.agent;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.os.Handler;
+import android.os.Looper;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -140,6 +143,84 @@ public class JarvisNative extends Plugin {
         return bo.toByteArray();
     }
 
+
+    // ---------- защита: подтверждение владельца, обратная связь и журнал ----------
+    // Опасные действия ставятся в ожидание, пока владелец не нажмёт на экране телефона.
+    // «Разрешить» — действие выполняется само, и результат возвращается в тот же вызов.
+    // «Отказать» или 5 минут без ответа — вызов завершается ошибкой с объяснением.
+    // Аварийная остановка: пустой файл KILL в Android/data/com.jarvis.agent/files.
+    private static final java.util.concurrent.ConcurrentHashMap<String, Long> APPROVED =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    private String levelOf(String cat) {
+        if (cat.equals("read") || cat.equals("net")) return "auto";
+        return "ask";
+    }
+
+    private boolean killed() {
+        File base = getContext().getExternalFilesDir(null);
+        return base != null && new File(base, "KILL").exists();
+    }
+
+    private void log(String cat, String what, String lv) {
+        try {
+            File f = new File(stashDir("log"), "actions.log");
+            String line = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())
+                    + " | " + cat + " | " + lv + " | " + what + "\n";
+            try (FileOutputStream os = new FileOutputStream(f, true)) {
+                os.write(line.getBytes(StandardCharsets.UTF_8));
+            }
+        } catch (Exception ignored) { }
+    }
+
+    /** true — можно выполнять сейчас. false — вызов уже завершён или ждёт ответа владельца. */
+    private boolean gate(PluginCall call, String method, String cat, String what) {
+        try {
+            String lv = killed() ? "deny" : levelOf(cat);
+            log(cat, what, lv);
+            if (lv.equals("auto")) return true;
+            if (lv.equals("deny")) { call.reject("Аварийная остановка активна (файл KILL)"); return false; }
+
+            String key = cat + "|" + what;
+            Long until = APPROVED.remove(key);
+            if (until != null && until > System.currentTimeMillis()) return true;
+
+            call.setKeepAlive(true);
+            final boolean[] decided = {false};
+            Handler main = new Handler(Looper.getMainLooper());
+            main.postDelayed(() -> {
+                if (!decided[0]) { decided[0] = true; call.reject("Владелец не ответил за 5 минут: " + what); }
+            }, 300000L);
+
+            getActivity().runOnUiThread(() -> new AlertDialog.Builder(getActivity())
+                    .setTitle("Джарвис: " + cat)
+                    .setMessage(what)
+                    .setCancelable(false)
+                    .setPositiveButton("Разрешить", (d, w) -> {
+                        if (decided[0]) return;
+                        decided[0] = true;
+                        APPROVED.put(key, System.currentTimeMillis() + 120000L);
+                        new Thread(() -> {
+                            try {
+                                getClass().getMethod(method, PluginCall.class).invoke(this, call);
+                            } catch (Exception e) {
+                                call.reject(String.valueOf(e.getMessage()));
+                            }
+                        }).start();
+                    })
+                    .setNegativeButton("Отказать", (d, w) -> {
+                        if (decided[0]) return;
+                        decided[0] = true;
+                        call.reject("Владелец отказал: " + what);
+                    })
+                    .show());
+            return false;
+        } catch (Exception e) {
+            call.reject(String.valueOf(e.getMessage()));
+            return false;
+        }
+    }
+
     // ---------- доступ ----------
     @PluginMethod
     public void access(PluginCall call) {
@@ -252,6 +333,7 @@ public class JarvisNative extends Plugin {
         try {
             need();
             File f = fileOf(call.getString("path"));
+            if (!gate(call, "writeText", "write", f.getAbsolutePath())) return;
             String text = call.getString("text", "");
             boolean append = call.getBoolean("append", false);
             String bk = null;
@@ -274,6 +356,7 @@ public class JarvisNative extends Plugin {
         try {
             need();
             File f = fileOf(call.getString("path"));
+            if (!gate(call, "replaceInFile", "write", f.getAbsolutePath())) return;
             String find = call.getString("find", "");
             String rep = call.getString("replace", "");
             boolean all = call.getBoolean("all", true);
@@ -313,6 +396,7 @@ public class JarvisNative extends Plugin {
         try {
             need();
             File f = fileOf(call.getString("path"));
+            if (!gate(call, "delete", "delete", f.getAbsolutePath())) return;
             if (!f.exists()) throw new IOException("Не найдено: " + f);
             String t = stash(f, "trash", true);
             JSObject o = new JSObject();
@@ -327,6 +411,7 @@ public class JarvisNative extends Plugin {
             need();
             File a = fileOf(call.getString("from"));
             File b = fileOf(call.getString("to"));
+            if (!gate(call, "move", "move", a.getAbsolutePath() + " -> " + b.getAbsolutePath())) return;
             if (!a.exists()) throw new IOException("Не найдено: " + a);
             if (b.isDirectory() && !a.getName().equals(b.getName())) b = new File(b, a.getName());
             String bk = null;
@@ -350,6 +435,7 @@ public class JarvisNative extends Plugin {
             need();
             File a = fileOf(call.getString("from"));
             File b = fileOf(call.getString("to"));
+            if (!gate(call, "copy", "copy", a.getAbsolutePath() + " -> " + b.getAbsolutePath())) return;
             if (!a.exists()) throw new IOException("Не найдено: " + a);
             if (b.isDirectory() && !a.getName().equals(b.getName())) b = new File(b, a.getName());
             String bk = null;
@@ -367,6 +453,7 @@ public class JarvisNative extends Plugin {
         try {
             need();
             File d = fileOf(call.getString("path"));
+            if (!gate(call, "mkdir", "write", d.getAbsolutePath())) return;
             if (!d.exists() && !d.mkdirs()) throw new IOException("Не удалось создать папку: " + d);
             JSObject o = new JSObject();
             o.put("path", d.getAbsolutePath());
@@ -405,6 +492,7 @@ public class JarvisNative extends Plugin {
         try {
             need();
             File f = fileOf(call.getString("path"));
+            if (!gate(call, "writeBase64", "write", f.getAbsolutePath())) return;
             boolean append = call.getBoolean("append", false);
             byte[] data = Base64.decode(call.getString("data", ""), Base64.DEFAULT);
             String bk = null;
@@ -504,6 +592,8 @@ public class JarvisNative extends Plugin {
             String method = call.getString("method", "GET");
             int timeout = call.getInt("timeoutMs", 30000);
             String saveTo = call.getString("saveTo");
+            if (saveTo != null && !gate(call, "http", "download", url + " -> " + saveTo)) return;
+            if (!gate(call, "http", "net", url)) return;
             HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
             c.setRequestMethod(method);
             c.setConnectTimeout(timeout);
@@ -559,6 +649,7 @@ public class JarvisNative extends Plugin {
         try {
             String cmd = call.getString("cmd");
             if (cmd == null) throw new IOException("Нет команды");
+            if (!gate(call, "shell", "shell", cmd)) return;
             int timeout = call.getInt("timeoutMs", 60000);
             ProcessBuilder pb = new ProcessBuilder("sh", "-c", cmd);
             pb.redirectErrorStream(true);
