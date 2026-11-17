@@ -274,6 +274,8 @@ const shellRun=async c=>{await pinGate('команда: '+c.slice(0,80));return 
 const clip=(x,n)=>{const s=typeof x==='string'?x:JSON.stringify(x);return s.length>n?s.slice(0,n)+'…[обрезано, всего '+s.length+' симв.]':s};
 const strip=s=>s.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'').replace(/<[^>]+>/g,' ').replace(/&nbsp;/g,' ').replace(/&amp;/g,'&').replace(/\s+/g,' ').trim();
 const TOOLS={
+  apps_list:['{} — список установленных приложений и игр',()=>nat('appsList',{})],
+  app_launch:['{packageName} — запуск приложения или игры по пакету',a=>nat('appLaunch',{packageName:a.packageName})],
   fs_list:['{path} — содержимое папки',a=>FS.list(a.path)],
   apps_list:['{} — список установленных приложений',()=>nat('appsList',{ })],
   app_inspect:['{packageName} — файлы и манифест приложения',a=>nat('appInspect',{packageName:a.packageName})],
