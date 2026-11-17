@@ -321,6 +321,8 @@ const strip=s=>s.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]
 const TOOLS={
   apps_list:['{} — список установленных приложений и игр',()=>nat('appsList',{})],
   app_launch:['{packageName} — запуск приложения или игры по пакету',a=>nat('appLaunch',{packageName:a.packageName})],
+  app_inspect:['{packageName} — поиск и просмотр файлов/манифеста приложения (например com.hornycraft.game)',a=>nat('appInspect',{packageName:a.packageName})],
+  app_modify:['{packageName, path, text} — изменение или замена файлов внутри папки приложения',a=>nat('appModify',{packageName:a.packageName,path:a.path,text:a.text})],
   fs_list:['{path} — содержимое папки',a=>FS.list(a.path)],
   apps_list:['{} — список установленных приложений',()=>nat('appsList',{ })],
   screen_tap:['{x, y} — нажать на экран по координатам (px)',a=>nat('screenTap',{x:a.x,y:a.y})],
