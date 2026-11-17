@@ -80,6 +80,36 @@ async function setBg(path){
   try{localStorage.setItem('jv_bg',JSON.stringify({path}))}catch(e){}
   return 'Фон установлен: '+path}
 
+async function pickAndSetBg(){
+  const inp=el('input',{type:'file',accept:'image/*',style:'display:none'});
+  inp.onchange=async()=>{
+    const f=inp.files[0];
+    if(!f)return;
+    try{
+      await fAdd([f]);
+      const m=fl[0];
+      if(m){
+        const d=await idb();
+        let path='';
+        try{
+          const parts=[];for(let i=0;i<m.n;i++)parts.push(await tx(d,'chunks','readonly',t=>t.objectStore('chunks').get(m.id+':'+i)));
+          const b=new Blob(parts,{type:m.type});
+          const reader=new FileReader();
+          reader.onload=async()=>{
+            document.body.style.backgroundImage='url("'+reader.result+'")';
+            try{localStorage.setItem('jv_bg_data',reader.result)}catch(e){}
+          };
+          reader.readAsDataURL(b);
+        }finally{d.close();}
+      }
+      err='';ans='Фон успешно изменен!';render();
+    }catch(e){err=String(e.message||e);render();}
+  };
+  document.body.append(inp);
+  inp.click();
+  inp.remove();
+}
+
 // Улучшение кода: проверка работоспособности → применение (сразу, если поручение ваше) или в «Одобрения»
 async function improve(goal,auto,taskId){
   const raw=await llm('Ты разработчик ИИ-помощника. Вот его текущий код (JavaScript):\n'+curCode()+'\n\nКод выполняется прямо в приложении на телефоне владельца, без ограничений (сеть, файлы, DOM — всё доступно). Готовые функции: api.llm(prompt) -> строка; api.memory() -> [{title,text}]; api.remember(title,text); api.agent(task) -> строка (встроенный агент с инструментами: файлы телефона, интернет); api.fs.{access,list,stat,read,write,replace,search,mkdir,copy,move,remove}; api.http(url,опции); api.shell(cmd). Код обязан определять async function handle(task, api), которая при task==="__ping__" возвращает строку "ok", а иначе возвращает текстовый ответ. Цель улучшения: '+goal+'\nВерни ТОЛЬКО полный новый код без пояснений и без markdown.');
@@ -196,7 +226,7 @@ function vSet(){
   const run=fn=>async()=>{msg='';try{await fn();if(!msg)msg='Готово'}catch(e){msg=String(e.message||e)}render()};
   return el('div',{class:'card'},el('b',null,'«Мозг»'),pv,md,f('key','Ключ API','password'),
     el('label',{class:'mode'},sr,'Самоанализ после задач (ИИ сам предлагает улучшения)'),el('label',{class:'mode'},ap,'Применять правки приложения сразу, без «Одобр.»'),el('label',{class:'mode'},pk,'Просить PIN при удалении, перезаписи и командах (если PIN задан)'),
-    el('div',{class:'row'},el('button',{class:'b g',onclick:run(async()=>{msg='Проверяю…';render();const t=await llm('Ответь одним словом: ок',true);msg='Связь есть. Ответ ИИ: '+t.slice(0,80)})},'Проверить связь с ИИ')),
+    el('div',{class:'row'},el('button',{class:'b g',onclick:run(async()=>{msg='Проверяю…';render();const t=await llm('Ответь одним словом: ок',true);msg='Связь есть. Ответ ИИ: '+t.slice(0,80)})},'Проверить связь с ИИ'),el('button',{class:'b',onclick:pickAndSetBg},'Выбрать фото на фон')),
     el('div',{class:'row'},el('button',{class:'b g',onclick:()=>{try{parent.postMessage('jv-check','*')}catch(e){}}},'Проверить обновления'),el('a',{class:'b g',target:'_blank',href:'https://github.com/'+(C.ghRepo||'zakiell1209/jarvis')+'/releases/latest',style:'text-decoration:none'},'Скачать свежий APK')),el('b',null,'Резерв в GitHub'),f('ghRepo','Репозиторий: логин/имя'),f('ghToken','GitHub токен','password'),
     el('div',{class:'row'},el('button',{class:'b',onclick:run(backup)},'Сохранить копию'),el('button',{class:'b g',onclick:run(async()=>{if(!unlocked)throw new Error('Сначала откройте вкладку «Правила» и введите PIN');await restore()})},'Восстановить')),
     msg&&el('div',{class:'mu'},msg));
@@ -408,5 +438,5 @@ function render(){
   $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
-try{const sb=ld('jv_bg',null);if(sb&&sb.path)setBg(sb.path).catch(()=>{});else nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
+try{const savedBgData=localStorage.getItem('jv_bg_data');if(savedBgData){document.body.style.backgroundImage='url("'+savedBgData+'")'}else{const sb=ld('jv_bg',null);if(sb&&sb.path)setBg(sb.path).catch(()=>{});else nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
