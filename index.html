@@ -174,11 +174,12 @@ async function runModTask(){
   render();
   try{
     modProgress=35; modBusy='Анализ файлов приложения '+modPkg+'…'; render();
-    await nat('appInspect',{packageName: modPkg});
+    try{ await nat('appInspect',{packageName: modPkg}); }catch(ex){}
     modProgress=60; modBusy='Применение изменений…'; render();
-    await agentLoop('Получи полный доступ ко всем файлам телефона через FS и модифицируй приложение ' + modPkg + ' по заданию: ' + modGoal + '. Используй app_modify, app_inspect и инструменты файловой системы.');
+    const res = await agentLoop('Получи полный доступ ко всем файлам телефона через FS и модифицируй приложение ' + modPkg + ' по заданию: ' + modGoal + '. Используй app_modify, app_inspect и инструменты файловой системы.');
     modProgress=100; modBusy='';
-    alert('Успешно! Изменения внесены и сохранены в приложении ' + modPkg);
+    ans = 'Результат моддинга:\n' + res;
+    alert('Моддинг завершен. Проверьте результат в задаче.');
   }catch(e){
     alert('Ошибка моддинга: ' + e.message);
   }
@@ -197,7 +198,7 @@ function vMod(){
         el('div',{class:'mu',style:'font-size:11px'},'com.hornicraft.app')
       ),
       modProgress>0?el('div',{class:'card'},el('div',{class:'mu'},modBusy),el('div',{style:'background:var(--bd);border-radius:6px;height:12px;margin-top:6px;overflow:hidden'},el('div',{style:'background:var(--ac);width:'+modProgress+'%;height:100%;transition:width 0.3s'}))):null,
-      el('div',{class:'row',style:'margin-top:10px'},el('button',{class:'b',disabled:!!modBusy||!modPkg,onclick:runModTask},modBusy||'Выполнить моддинг'))
+      el('div',{class:'row',style:'margin-top:10px'},el('button',{class:'b',disabled:!!modBusy,onclick:runModTask},modBusy||'Выполнить моддинг'))
     )
   ];
 }
