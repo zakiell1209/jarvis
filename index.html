@@ -381,7 +381,7 @@ async function agentLoop(task){
 
 // ===== Вкладка «Файлы»: проводник по памяти телефона =====
 let pfp='',pfe=[],pff=null,pfq='',pfr=null,pfer='',pfload=false,pfacc=null,pfmode='phone',pfbusy='';
-async function pfInit(){pfer='';try{pfacc=await FS.access();if(pfacc.granted){await pfLs(pfp||pfacc.root);return}}catch(e){pfer=String(e.message||e)}render()}
+async function pfInit(){pfer='';try{pfacc=await FS.access();if(!pfacc.granted){try{await FS.requestAccess()}catch(ex){}}pfacc=await FS.access();if(pfacc.granted){await pfLs(pfp||pfacc.root);return}}catch(e){pfer=String(e.message||e)}render()}
 async function pfLs(p){pfer='';pff=null;pfr=null;try{const r=await FS.list(p);pfp=r.path;pfe=r.entries;if(r.total>r.entries.length)pfer='Показано '+r.entries.length+' из '+r.total}catch(e){pfer=String(e.message||e)}render()}
 const pfUp=()=>{const i=pfp.replace(/\/+$/,'').lastIndexOf('/');return i>0?pfp.slice(0,i):'/'};
 const pfClose=()=>{if(pff&&pff.url)URL.revokeObjectURL(pff.url);pff=null;render()};
