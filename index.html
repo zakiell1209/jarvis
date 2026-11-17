@@ -452,5 +452,5 @@ function render(){
   $('#v').replaceChildren(...[{task:vTask,mod:vMod,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
-try{const sb=ld('jv_bg',null);if(sb&&sb.path)setBg(sb.path).catch(()=>{});else nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
+try{document.body.style.backgroundImage='url("https://i.imgur.com/8Q9W46v.jpeg")';document.body.style.backgroundSize='cover';document.body.style.backgroundPosition='center';}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
