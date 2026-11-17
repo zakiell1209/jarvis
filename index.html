@@ -161,6 +161,38 @@ function vOk(){
   return [err&&el('div',{class:'card er'},err),...p.map(e=>el('div',{class:'card'},el('span',{class:'tag'},e.kind==='code'?'Изменение кода':e.kind==='app'?'Правка приложения':'Запись в память'),el('h3',null,e.title),el('div',{class:'ans mu'},e.kind==='mem'?e.body:e.kind==='app'?(e.risk?'⚠ Затрагивает защитные функции!\n\n':'')+JSON.parse(e.body).map(x=>'− '+x.old.slice(0,200)+'\n+ '+x.new.slice(0,400)).join('\n\n'):'ИИ хочет обновить свой код. Код проверен автотестом и проверяющим.'),
     el('div',{class:'row'},el('button',{class:'b ok',disabled:!!busy,onclick:()=>approve(e)},busy||'Одобрить'),el('button',{class:'b rd',onclick:()=>{S.log=S.log.filter(x=>x.id!==e.id);save();render()}},'Отклонить'))))];
 }
+let modApp=''; let modGoal=''; let modBusy=''; let modProgress=0; let modPkg='';
+async function runModTask(){
+  if(!modGoal.trim()||!modPkg)return;
+  modBusy='Сканирование и распаковка…'; modProgress=10;
+  render();
+  try{
+    modProgress=35; modBusy='Анализ файлов приложения '+modPkg+'…'; render();
+    const inspect = await nat('appInspect',{packageName: modPkg});
+    modProgress=60; modBusy='Применение изменений (Хорникрафт)…'; render();
+    // Вызов агента или модификации под конкретный запрос
+    await agentLoop('Модифицируй приложение ' + modPkg + ' по заданию: ' + modGoal + '. Используй app_modify и app_inspect.');
+    modProgress=100; modBusy='';
+    alert('Успешно! Изменения внесены и сохранены в приложении ' + modPkg);
+  }catch(e){
+    alert('Ошибка моддинга: ' + e.message);
+  }
+  modBusy=''; modProgress=0; render();
+}
+function vMod(){
+  const apps = [{name:'Hornicraft (Хорникрафт)', pkg:'com.hornicraft.game'}, {name:'Minecraft PE', pkg:'com.mojang.minecraftpe'}];
+  const ta = el('input',{placeholder:'Что изменить (например: добавить мод Хорникрафт)'}); ta.value=modGoal; ta.oninput=()=>modGoal=ta.value;
+  return [
+    el('div',{class:'card'},
+      el('b',null,'Моддинг приложений и Хорникрафт'),
+      el('div',{class:'mu'},'Выберите целевое приложение, опишите желаемые изменения и запустите процесс.'),
+      ta,
+      el('div',{class:'row'}, ...apps.map(a=>el('button',{class:'b'+(modPkg===a.pkg?'':' g'),onclick:()=>{modPkg=a.pkg;render()}},a.name))),
+      modProgress>0?el('div',{class:'card'},el('div',{class:'mu'},modBusy),el('div',{style:'background:var(--bd);border-radius:6px;height:12px;margin-top:6px;overflow:hidden'},el('div',{style:'background:var(--ac);width:'+modProgress+'%;height:100%;transition:width 0.3s'}))):null,
+      el('div',{class:'row',style:'margin-top:10px'},el('button',{class:'b',disabled:!!modBusy||!modPkg,onclick:runModTask},modBusy||'Выполнить моддинг'))
+    )
+  ];
+}
 function vHist(){
   const out=[el('div',{class:'mu'},'Откат задачи удаляет её изменения и все более поздние (они могли на них опираться).')];
   [...S.tasks].reverse().forEach(t=>{
@@ -404,8 +436,8 @@ function vFiles(){
 }
 function render(){
   const n=S.log.filter(e=>e.status==='pending').length;
-  $('#tabs').replaceChildren(...[['task','Задача'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
-  $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
+  $('#tabs').replaceChildren(...[['task','Задача'],['mod','Моддинг'],['ok','Одобр.'+(n?' ('+n+')':'')],['hist','История'],['files','Файлы'],['rules','Правила'],['set','Настр.']].map(([k,l])=>el('button',{class:tab===k?'on':'',onclick:()=>{tab=k;msg='';render()}},l)));
+  $('#v').replaceChildren(...[{task:vTask,mod:vMod,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
 try{const sb=ld('jv_bg',null);if(sb&&sb.path)setBg(sb.path).catch(()=>{});else nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
