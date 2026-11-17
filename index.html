@@ -162,12 +162,10 @@ function vOk(){
     el('div',{class:'row'},el('button',{class:'b ok',disabled:!!busy,onclick:()=>approve(e)},busy||'Одобрить'),el('button',{class:'b rd',onclick:()=>{S.log=S.log.filter(x=>x.id!==e.id);save();render()}},'Отклонить'))))];
 }
 let modApp=''; let modGoal=''; let modBusy=''; let modProgress=0; let modPkg='';
-let allPhoneApps = [];
+let allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
 async function loadPhoneApps(){
-  try{
-    const r = await nat('appsList',{});
-    if(r && r.apps) allPhoneApps = r.apps;
-  }catch(e){}
+  allPhoneApps = [{name: 'Хорикрафт', packageName: 'com.hornicraft.app'}];
+  modPkg = 'com.hornicraft.app';
   render();
 }
 async function runModTask(){
@@ -194,11 +192,9 @@ function vMod(){
       el('b',null,'Моддинг приложений телефона'),
       el('div',{class:'mu'},'Выберите приложение, опишите желаемые изменения и запустите процесс. Джарвис получит доступ ко всем файлам и изменит приложение.'),
       ta,
-      el('div',{style:'max-height:220px;overflow-y:auto;margin:8px 0;display:flex;flex-direction:column;gap:6px'}, 
-        allPhoneApps.length ? allPhoneApps.map(a=>el('div',{class:'card',style:'display:flex;align-items:center;gap:10px;margin:0;cursor:pointer;'+(modPkg===a.packageName?'border-color:var(--ac);background:var(--bd)':''),onclick:()=>{modPkg=a.packageName;render()}}, 
-          a.icon?el('img',{src:'data:image/png;base64,'+a.icon,style:'width:36px;height:36px;border-radius:8px'}):el('div',{style:'width:36px;height:36px;background:var(--bd);border-radius:8px'}),
-          el('div',{style:'flex:1'},el('b',null,a.name),el('div',{class:'mu',style:'font-size:11px'},a.packageName))
-        )) : el('div',{class:'mu'},'Загрузка списка приложений…')
+      el('div',{class:'card',style:'border-color:var(--ac);background:var(--bd);margin:8px 0'}, 
+        el('b',null,'Целевое приложение: Хорикрафт'),
+        el('div',{class:'mu',style:'font-size:11px'},'com.hornicraft.app')
       ),
       modProgress>0?el('div',{class:'card'},el('div',{class:'mu'},modBusy),el('div',{style:'background:var(--bd);border-radius:6px;height:12px;margin-top:6px;overflow:hidden'},el('div',{style:'background:var(--ac);width:'+modProgress+'%;height:100%;transition:width 0.3s'}))):null,
       el('div',{class:'row',style:'margin-top:10px'},el('button',{class:'b',disabled:!!modBusy||!modPkg,onclick:runModTask},modBusy||'Выполнить моддинг'))
