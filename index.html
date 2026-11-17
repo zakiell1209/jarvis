@@ -3,6 +3,7 @@
 <title>Джарвис</title>
 <style>
 :root{--bg:#dcfce7;--cd:#f0fdf4;--tx:#14532d;--mu:#4ade80;--ac:#16a34a;--ok:#16a34a;--bad:#dc2626;--bd:#bbf7d0;color-scheme:light}
+body{background-size:cover;background-position:center;background-repeat:no-repeat;background-attachment:fixed}
 @media(prefers-color-scheme:dark){:root{--bg:#052e16;--cd:#064e3b;--tx:#dcfce7;--mu:#34d399;--ac:#22c55e;--bd:#065f46;color-scheme:dark}}
 body{margin:0;background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,sans-serif}
 main{max-width:640px;margin:0 auto;padding:calc(12px + env(safe-area-inset-top,0px)) 14px 90px}
@@ -391,5 +392,5 @@ function render(){
   $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
-try{parent.postMessage('jv-ready','*')}catch(e){}
+try{nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length){const u=r.results[Math.floor(Math.random()*r.results.length)].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
