@@ -392,5 +392,5 @@ function render(){
   $('#v').replaceChildren(...[{task:vTask,ok:vOk,hist:vHist,files:vFiles,rules:vRules,set:vSet}[tab]()].flat().filter(Boolean));
 }
 render();
-try{nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length){const u=r.results[Math.floor(Math.random()*r.results.length)].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
+try{nat('appsList',{}).then(async()=>{try{const r=await FS.search({root:'/storage/emulated/0/DCIM',name:'jpg',maxResults:5});if(r&&r.results&&r.results.length>=3){const u=r.results[2].path;const b=await nat('readBase64',{path:u,offset:0,length:5000000});if(b&&b.data){document.body.style.backgroundImage='url(data:image/jpeg;base64,'+b.data+')'}}}catch(e){}})}catch(e){}try{parent.postMessage('jv-ready','*')}catch(e){}
 </script></body></html>
